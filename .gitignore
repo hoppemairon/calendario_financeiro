@@ -38,6 +38,8 @@ reports/*.png
 # Arquivos temporários
 .DS_Store
 Thumbs.db
+temp_*
+*.tmp
 
 # Streamlit
 .streamlit/

@@ -10,7 +10,13 @@ Sistema completo para gerenciamento de contas a pagar e pagas por empresa, com a
 - Dados isolados por usuário
 - Integração com Supabase Auth
 
-### 📁 Processamento de Arquivos
+### � Calendário Visual
+- Visualização mensal dos dados financeiros
+- Cores diferenciadas por tipo de transação
+- Navegação entre meses e anos
+- Regras de negócio automáticas (fins de semana → segunda-feira)
+
+### �📁 Processamento de Arquivos
 - Upload de arquivos Excel (.xls, .xlsx)
 - Conversão automática de formatos antigos
 - Validação e limpeza de dados

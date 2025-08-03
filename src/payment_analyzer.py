@@ -31,6 +31,9 @@ class PaymentAnalyzer:
         if df.empty:
             return df
         
+        print(f"🔍 Processando DataFrame tipo '{tipo}' com {len(df)} registros")
+        print(f"📋 Colunas disponíveis: {list(df.columns)}")
+        
         df = df.copy()
         
         # Verificar e garantir que as colunas necessárias existam
@@ -77,6 +80,9 @@ class PaymentAnalyzer:
             df['valor'].round(2).astype(str)
         )
         
+        print(f"✅ Chave de comparação criada para {len(df)} registros")
+        print(f"📋 Colunas finais: {list(df.columns)}")
+        
         return df
     
     def encontrar_correspondencias(self, df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame) -> Dict:
@@ -101,10 +107,19 @@ class PaymentAnalyzer:
         
         # Preparar dados para comparação
         try:
-            df_a_pagar = self.criar_chave_comparacao(df_a_pagar, 'a_pagar')
-            df_pagas = self.criar_chave_comparacao(df_pagas, 'pagas')
+            df_a_pagar_processado = self.criar_chave_comparacao(df_a_pagar, 'a_pagar')
+            df_pagas_processado = self.criar_chave_comparacao(df_pagas, 'pagas')
+            
+            # Verificar se as chaves foram criadas com sucesso
+            if 'chave_comparacao' not in df_a_pagar_processado.columns or 'chave_comparacao' not in df_pagas_processado.columns:
+                raise ValueError("Chaves de comparação não foram criadas corretamente")
+                
+            df_a_pagar = df_a_pagar_processado
+            df_pagas = df_pagas_processado
+            
         except Exception as e:
             print(f"❌ Erro ao criar chaves de comparação: {e}")
+            # Retornar dados básicos sem comparação
             return {
                 'exatas': [],
                 'aproximadas': [],
