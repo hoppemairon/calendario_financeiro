@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Executar Calendário Financeiro",
+			"type": "shell",
+			"command": "streamlit",
+			"args": [
+				"run",
+				"main.py"
+			],
+			"group": "build",
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}

@@ -1,0 +1,9 @@
+empresa,valor,data_vencimento,descricao,categoria
+Empresa ABC Ltda,1500.00,2024-12-15,Fornecedor de Material de Escritório,Material
+Tech Solutions SA,2800.50,2024-12-18,Serviços de TI - Manutenção Mensal,Serviços
+Distribuidora XYZ,890.75,2024-12-20,Produtos de Limpeza,Material
+Consultoria Alpha,3200.00,2024-12-22,Consultoria Jurídica,Serviços
+Fornecedor Beta,1250.30,2024-12-25,Matéria Prima,Material
+Energia Elétrica SA,680.90,2024-12-28,Conta de Energia,Utilidades
+Internet Corp,150.00,2024-12-30,Internet Corporativa,Utilidades
+Transportadora Gama,450.00,2025-01-05,Frete de Mercadorias,Logística

@@ -1,0 +1,49 @@
+# Ignorar arquivos Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Ambientes virtuais
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Arquivos de dados sensíveis
+data/contas_a_pagar/*.xlsx
+data/contas_a_pagar/*.xls
+data/contas_pagas/*.xlsx
+data/contas_pagas/*.xls
+data/processed/*.xlsx
+data/processed/*.xls
+
+# Relatórios gerados
+reports/*.xlsx
+reports/*.html
+reports/*.png
+
+# Logs
+*.log
+
+# Arquivos de configuração local
+.vscode/settings.json
+
+# Arquivos temporários
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Mantém a estrutura de diretórios vazios
+!data/contas_a_pagar/.gitkeep
+!data/contas_pagas/.gitkeep
+!data/processed/.gitkeep
+!reports/.gitkeep
