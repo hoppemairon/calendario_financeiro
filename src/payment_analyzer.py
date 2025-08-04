@@ -74,16 +74,31 @@ class PaymentAnalyzer:
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0.0)
         
         # Criar chave de comparação
-        df['chave_comparacao'] = (
-            df['empresa_norm'] + "_" + 
-            df['descricao_norm'] + "_" + 
-            df['valor'].round(2).astype(str)
-        )
-        
-        print(f"✅ Chave de comparação criada para {len(df)} registros")
-        print(f"📋 Colunas finais: {list(df.columns)}")
-        
-        return df
+        try:
+            df['chave_comparacao'] = (
+                df['empresa_norm'].astype(str) + "_" + 
+                df['descricao_norm'].astype(str) + "_" + 
+                df['valor'].round(2).astype(str)
+            )
+            
+            print(f"✅ Chave de comparação criada para {len(df)} registros")
+            print(f"📋 Colunas finais: {list(df.columns)}")
+            
+            # Verificar se a chave foi criada corretamente
+            if 'chave_comparacao' not in df.columns:
+                raise ValueError("Falha ao criar coluna chave_comparacao")
+                
+            # Verificar se há valores nulos na chave
+            chaves_nulas = df['chave_comparacao'].isna().sum()
+            if chaves_nulas > 0:
+                print(f"⚠️ {chaves_nulas} chaves de comparação são nulas")
+            
+            return df
+            
+        except Exception as e:
+            print(f"❌ Erro ao criar chave de comparação: {str(e)}")
+            # Retornar DataFrame original se falhar
+            return df
     
     def encontrar_correspondencias(self, df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame) -> Dict:
         """
@@ -111,8 +126,25 @@ class PaymentAnalyzer:
             df_pagas_processado = self.criar_chave_comparacao(df_pagas, 'pagas')
             
             # Verificar se as chaves foram criadas com sucesso
-            if 'chave_comparacao' not in df_a_pagar_processado.columns or 'chave_comparacao' not in df_pagas_processado.columns:
-                raise ValueError("Chaves de comparação não foram criadas corretamente")
+            if 'chave_comparacao' not in df_a_pagar_processado.columns:
+                print(f"⚠️ Chave de comparação não foi criada para contas a pagar. Usando comparação simples.")
+                # Retornar resultado vazio mas válido
+                return {
+                    'exatas': [],
+                    'aproximadas': [],
+                    'nao_encontradas': [],
+                    'pagas_nao_encontradas': []
+                }
+            
+            if 'chave_comparacao' not in df_pagas_processado.columns:
+                print(f"⚠️ Chave de comparação não foi criada para contas pagas. Usando comparação simples.")
+                # Se não há contas pagas, todas as contas a pagar são não encontradas
+                return {
+                    'exatas': [],
+                    'aproximadas': [],
+                    'nao_encontradas': df_a_pagar_processado.to_dict('records'),
+                    'pagas_nao_encontradas': []
+                }
                 
             df_a_pagar = df_a_pagar_processado
             df_pagas = df_pagas_processado

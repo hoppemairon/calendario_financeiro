@@ -333,7 +333,7 @@ class SupabaseClient:
             return pd.DataFrame()
         
         try:
-            query = self.supabase.table("contas_a_pagar").select("*").eq("usuario_id", self.user_id)
+            query = self.supabase.table("contas_a_pagar").select("*").eq("usuario_id", self.user_id).order("data_vencimento", desc=False).order("id", desc=False).limit(10000)
             
             # Filtros opcionais
             if empresa:
@@ -472,7 +472,7 @@ class SupabaseClient:
             return pd.DataFrame()
         
         try:
-            query = self.supabase.table("contas_pagas").select("*").eq("usuario_id", self.user_id)
+            query = self.supabase.table("contas_pagas").select("*").eq("usuario_id", self.user_id).limit(10000)
             
             # Filtros opcionais
             if empresa:
@@ -505,12 +505,14 @@ class SupabaseClient:
             response_a_pagar = self.supabase.table("contas_a_pagar")\
                 .select("empresa")\
                 .eq("usuario_id", self.user_id)\
+                .limit(10000)\
                 .execute()
             
             # Buscar empresas únicas das contas pagas
             response_pagas = self.supabase.table("contas_pagas")\
                 .select("empresa")\
                 .eq("usuario_id", self.user_id)\
+                .limit(10000)\
                 .execute()
             
             empresas = set()
@@ -704,7 +706,7 @@ class SupabaseClient:
                         data_vencimento = str(data_vencimento)
                 
                 # Verificar se já existe um registro similar
-                response = self.supabase.table("contas_a_pagar").select("id").eq("usuario_id", self.user_id).eq("empresa", empresa).eq("valor", valor).eq("data_vencimento", data_vencimento).eq("descricao", descricao).execute()
+                response = self.supabase.table("contas_a_pagar").select("id").eq("usuario_id", self.user_id).eq("empresa", empresa).eq("valor", valor).eq("data_vencimento", data_vencimento).eq("descricao", descricao).limit(1).execute()
                 
                 if response.data and len(response.data) > 0:
                     duplicatas += 1
@@ -748,7 +750,7 @@ class SupabaseClient:
                         data_pagamento = str(data_pagamento)
                 
                 # Verificar se já existe um registro similar
-                response = self.supabase.table("contas_pagas").select("id").eq("usuario_id", self.user_id).eq("empresa", empresa).eq("valor", valor).eq("data_pagamento", data_pagamento).eq("descricao", descricao).execute()
+                response = self.supabase.table("contas_pagas").select("id").eq("usuario_id", self.user_id).eq("empresa", empresa).eq("valor", valor).eq("data_pagamento", data_pagamento).eq("descricao", descricao).limit(1).execute()
                 
                 if response.data and len(response.data) > 0:
                     duplicatas += 1
