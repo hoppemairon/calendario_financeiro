@@ -27,6 +27,19 @@ class ClientFileConverter:
             'Histórico': 'descricao',
             'IdMovimento': 'id_movimento'
         }
+        
+        # Mapeamento para o novo formato "Modelo_Contas_Pagar"
+        self.colunas_modelo_contas_pagar = {
+            'Empresa': 'empresa',
+            'DataVencimento': 'data_vencimento',
+            'Fornecedor': 'fornecedor',
+            'ValorDoc': 'valor',
+            'Histórico': 'descricao',
+            'DescriçãoConta': 'categoria',
+            'NúmeroDocumento': 'numero_documento',
+            'IdConta_Financeira': 'id_conta',
+            'IdMovimento': 'id_movimento'
+        }
     
     def detectar_formato_cliente(self, arquivo_path: str) -> bool:
         """
@@ -52,6 +65,38 @@ class ClientFileConverter:
             
         except Exception as e:
             logger.error(f"Erro ao detectar formato do cliente: {str(e)}")
+            return False
+    
+    def detectar_formato_modelo_contas_pagar(self, arquivo_path: str) -> bool:
+        """
+        Detecta se o arquivo está no formato "Modelo_Contas_Pagar".
+        
+        Args:
+            arquivo_path: Caminho para o arquivo
+            
+        Returns:
+            bool: True se for formato Modelo_Contas_Pagar
+        """
+        try:
+            # Verificar se tem a aba "Contas a Pagar"
+            excel_file = pd.ExcelFile(arquivo_path)
+            if 'Contas a Pagar' not in excel_file.sheet_names:
+                return False
+            
+            # Ler a aba específica
+            df = pd.read_excel(arquivo_path, sheet_name='Contas a Pagar')
+            
+            # Verificar se tem as colunas características
+            colunas_necessarias = ['Empresa', 'DataVencimento', 'Fornecedor', 'ValorDoc', 'Histórico']
+            colunas_arquivo = [col for col in df.columns]
+            
+            # Verificar se pelo menos 4 das 5 colunas principais estão presentes
+            colunas_encontradas = sum(1 for col in colunas_necessarias if col in colunas_arquivo)
+            
+            return colunas_encontradas >= 4
+            
+        except Exception as e:
+            logger.error(f"Erro ao detectar formato Modelo_Contas_Pagar: {str(e)}")
             return False
     
     def converter_arquivo_cliente(self, arquivo_path: str) -> Optional[pd.DataFrame]:
@@ -123,7 +168,7 @@ class ClientFileConverter:
             df_convertido = pd.DataFrame(dados_convertidos)
             
             # Limpar e validar dados
-            df_convertido = self._limpar_dados_convertidos(df_convertido)
+            df_convertido = self._limpar_dados_convertidos(df_convertido, 'formato_erp_cliente')
             
             logger.info(f"Conversão concluída: {len(df_convertido)} registros convertidos")
             return df_convertido
@@ -132,12 +177,90 @@ class ClientFileConverter:
             logger.error(f"Erro ao converter arquivo do cliente: {str(e)}")
             return None
     
-    def _limpar_dados_convertidos(self, df: pd.DataFrame) -> pd.DataFrame:
+    def converter_modelo_contas_pagar(self, arquivo_path: str) -> Optional[pd.DataFrame]:
+        """
+        Converte arquivo do formato "Modelo_Contas_Pagar" para o formato padrão.
+        
+        Args:
+            arquivo_path: Caminho para o arquivo Modelo_Contas_Pagar
+            
+        Returns:
+            DataFrame convertido ou None se houver erro
+        """
+        try:
+            # Ler a aba "Contas a Pagar"
+            df_original = pd.read_excel(arquivo_path, sheet_name='Contas a Pagar')
+            
+            logger.info(f"Processando arquivo Modelo_Contas_Pagar: {arquivo_path}")
+            logger.info(f"Tamanho original: {df_original.shape}")
+            
+            # Verificar se tem dados
+            if df_original.empty:
+                logger.warning("Arquivo está vazio")
+                return None
+            
+            # Criar DataFrame convertido com mapeamento das colunas
+            dados_convertidos = []
+            
+            for idx, row in df_original.iterrows():
+                try:
+                    # Verificar se tem dados válidos (empresa e valor)
+                    if pd.isna(row.get('Empresa')) or pd.isna(row.get('ValorDoc')):
+                        continue
+                    
+                    # Tratar valor
+                    valor = row.get('ValorDoc', 0)
+                    if pd.isna(valor) or valor == 0:
+                        continue
+                    
+                    # Tratar data
+                    data_vencimento = row.get('DataVencimento')
+                    if pd.isna(data_vencimento):
+                        continue
+                    
+                    # Montar registro convertido
+                    registro = {
+                        'empresa': str(row.get('Empresa', '')).strip(),
+                        'data_vencimento': data_vencimento,
+                        'valor': float(valor),
+                        'descricao': str(row.get('Histórico', '')).strip(),
+                        'categoria': str(row.get('DescriçãoConta', '')).strip(),
+                        'fornecedor': str(row.get('Fornecedor', '')).strip(),
+                        'numero_documento': str(row.get('NúmeroDocumento', '')).strip(),
+                        'id_conta': row.get('IdConta_Financeira'),
+                        'id_movimento': row.get('IdMovimento')
+                    }
+                    
+                    dados_convertidos.append(registro)
+                    
+                except Exception as row_error:
+                    logger.warning(f"Erro ao processar linha {idx}: {str(row_error)}")
+                    continue
+            
+            if not dados_convertidos:
+                logger.warning("Nenhum dado válido encontrado no arquivo")
+                return None
+            
+            # Criar DataFrame
+            df_convertido = pd.DataFrame(dados_convertidos)
+            
+            # Limpar e validar dados
+            df_convertido = self._limpar_dados_convertidos(df_convertido, 'modelo_contas_pagar')
+            
+            logger.info(f"Conversão Modelo_Contas_Pagar concluída: {len(df_convertido)} registros convertidos")
+            return df_convertido
+            
+        except Exception as e:
+            logger.error(f"Erro ao converter arquivo Modelo_Contas_Pagar: {str(e)}")
+            return None
+    
+    def _limpar_dados_convertidos(self, df: pd.DataFrame, tipo_conversao: str = 'formato_cliente') -> pd.DataFrame:
         """
         Limpa e valida os dados convertidos.
         
         Args:
             df: DataFrame com dados convertidos
+            tipo_conversao: Tipo de conversão realizada
             
         Returns:
             DataFrame limpo
@@ -153,7 +276,7 @@ class ClientFileConverter:
         df = df.dropna(subset=['valor', 'data_vencimento'])
         
         # Limpar strings
-        colunas_string = ['empresa_origem', 'empresa', 'descricao', 'categoria', 'numero_documento']
+        colunas_string = ['empresa_origem', 'empresa', 'descricao', 'categoria', 'numero_documento', 'fornecedor']
         for col in colunas_string:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
@@ -161,7 +284,7 @@ class ClientFileConverter:
         
         # Adicionar metadados
         df['data_processamento'] = datetime.now()
-        df['tipo_conversao'] = 'formato_cliente'
+        df['tipo_conversao'] = tipo_conversao
         
         return df
     

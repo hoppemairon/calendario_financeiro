@@ -217,7 +217,7 @@ class SupabaseClient:
     
     # ==================== CONTAS A PAGAR ====================
     
-    def inserir_contas_a_pagar(self, df: pd.DataFrame, arquivo_origem: str = None, processamento_id: str = None) -> Dict[str, Any]:
+    def inserir_contas_a_pagar(self, df: pd.DataFrame, arquivo_origem: str = None, processamento_id: str = None, verificar_duplicatas: bool = True) -> Dict[str, Any]:
         """Insere contas a pagar no banco."""
         if not self.user_id:
             return {"success": False, "error": "Usuário não autenticado"}
@@ -225,6 +225,21 @@ class SupabaseClient:
         try:
             # Verificar se o usuário existe na tabela usuarios
             self._garantir_usuario_existe()
+            
+            # Verificar duplicatas se solicitado
+            duplicatas_info = {"duplicatas": 0, "novos": len(df), "df_novos": df}
+            if verificar_duplicatas:
+                duplicatas_info = self.verificar_duplicatas_contas_a_pagar(df)
+                df = duplicatas_info["df_novos"]
+                
+                # Se não há registros novos, retornar
+                if len(df) == 0:
+                    return {
+                        "success": True,
+                        "registros_inseridos": 0,
+                        "duplicatas_ignoradas": duplicatas_info["duplicatas"],
+                        "message": f"Nenhum registro novo encontrado. {duplicatas_info['duplicatas']} duplicatas ignoradas."
+                    }
             
             # Preparar dados para inserção
             registros = []
@@ -251,6 +266,7 @@ class SupabaseClient:
                     empresa = str(row.get('empresa', '')).strip() if not pd.isna(row.get('empresa', '')) else ''
                     descricao = str(row.get('descricao', '')).strip() if not pd.isna(row.get('descricao', '')) else ''
                     categoria = str(row.get('categoria', '')).strip() if not pd.isna(row.get('categoria', '')) else ''
+                    fornecedor = str(row.get('fornecedor', '')).strip() if not pd.isna(row.get('fornecedor', '')) else ''
                     
                     registro = {
                         "usuario_id": self.user_id,
@@ -259,6 +275,7 @@ class SupabaseClient:
                         "data_vencimento": data_vencimento,
                         "descricao": descricao,
                         "categoria": categoria,
+                        "fornecedor": fornecedor,
                         "arquivo_origem": arquivo_origem,
                         "processamento_id": processamento_id
                     }
@@ -291,10 +308,16 @@ class SupabaseClient:
                             print(f"Erro ao inserir registro individual: {single_error}")
                             continue
             
+            # Preparar mensagem final
+            mensagem = f"{total_inseridos} contas a pagar inseridas com sucesso!"
+            if verificar_duplicatas and duplicatas_info["duplicatas"] > 0:
+                mensagem += f" {duplicatas_info['duplicatas']} duplicatas ignoradas."
+            
             return {
                 "success": True,
                 "registros_inseridos": total_inseridos,
-                "message": f"{total_inseridos} contas a pagar inseridas com sucesso!"
+                "duplicatas_ignoradas": duplicatas_info["duplicatas"] if verificar_duplicatas else 0,
+                "message": mensagem
             }
             
         except Exception as e:
@@ -333,41 +356,114 @@ class SupabaseClient:
     
     # ==================== CONTAS PAGAS ====================
     
-    def inserir_contas_pagas(self, df: pd.DataFrame, arquivo_origem: str = None, processamento_id: str = None) -> Dict[str, Any]:
+    def inserir_contas_pagas(self, df: pd.DataFrame, arquivo_origem: str = None, processamento_id: str = None, verificar_duplicatas: bool = True) -> Dict[str, Any]:
         """Insere contas pagas no banco."""
         if not self.user_id:
             return {"success": False, "error": "Usuário não autenticado"}
         
         try:
+            # Verificar se o usuário existe na tabela usuarios
+            self._garantir_usuario_existe()
+            
+            # Verificar duplicatas se solicitado
+            duplicatas_info = {"duplicatas": 0, "novos": len(df), "df_novos": df}
+            if verificar_duplicatas:
+                duplicatas_info = self.verificar_duplicatas_contas_pagas(df)
+                df = duplicatas_info["df_novos"]
+                
+                # Se não há registros novos, retornar
+                if len(df) == 0:
+                    return {
+                        "success": True,
+                        "registros_inseridos": 0,
+                        "duplicatas_ignoradas": duplicatas_info["duplicatas"],
+                        "message": f"Nenhum registro novo encontrado. {duplicatas_info['duplicatas']} duplicatas ignoradas."
+                    }
+            
             # Preparar dados para inserção
             registros = []
             for _, row in df.iterrows():
-                registro = {
-                    "usuario_id": self.user_id,
-                    "empresa": str(row.get('empresa', '')),
-                    "valor": float(row.get('valor', 0)),
-                    "data_pagamento": str(row.get('data_pagamento', row.get('data_vencimento', ''))),
-                    "descricao": str(row.get('descricao', '')),
-                    "categoria": str(row.get('categoria', '')),
-                    "arquivo_origem": arquivo_origem,
-                    "processamento_id": processamento_id
-                }
-                registros.append(registro)
+                try:
+                    # Tratar valor
+                    valor = row.get('valor', 0)
+                    if pd.isna(valor):
+                        valor = 0
+                    valor = float(valor)
+                    
+                    # Tratar data de pagamento
+                    data_pagamento = row.get('data_pagamento', row.get('data_vencimento', ''))
+                    if pd.isna(data_pagamento):
+                        data_pagamento = '2025-01-01'
+                    else:
+                        # Converter para string se for datetime
+                        if hasattr(data_pagamento, 'strftime'):
+                            data_pagamento = data_pagamento.strftime('%Y-%m-%d')
+                        else:
+                            data_pagamento = str(data_pagamento)
+                    
+                    # Tratar strings
+                    empresa = str(row.get('empresa', '')).strip() if not pd.isna(row.get('empresa', '')) else ''
+                    descricao = str(row.get('descricao', '')).strip() if not pd.isna(row.get('descricao', '')) else ''
+                    categoria = str(row.get('categoria', '')).strip() if not pd.isna(row.get('categoria', '')) else ''
+                    fornecedor = str(row.get('fornecedor', '')).strip() if not pd.isna(row.get('fornecedor', '')) else ''
+                    
+                    registro = {
+                        "usuario_id": self.user_id,
+                        "empresa": empresa,
+                        "valor": valor,
+                        "data_pagamento": data_pagamento,
+                        "descricao": descricao,
+                        "categoria": categoria,
+                        "fornecedor": fornecedor,
+                        "arquivo_origem": arquivo_origem,
+                        "processamento_id": processamento_id
+                    }
+                    registros.append(registro)
+                    
+                except Exception as row_error:
+                    print(f"Erro ao processar linha de conta paga: {row_error}")
+                    continue
             
-            # Inserir no banco
-            response = self.supabase.table("contas_pagas").insert(registros).execute()
+            # Inserir no banco em lotes menores para evitar timeout
+            batch_size = 100
+            total_inseridos = 0
+            
+            for i in range(0, len(registros), batch_size):
+                batch = registros[i:i + batch_size]
+                
+                try:
+                    response = self.supabase.table("contas_pagas").insert(batch).execute()
+                    total_inseridos += len(batch)
+                    print(f"Lote contas pagas {i//batch_size + 1}: {len(batch)} registros inseridos")
+                    
+                except Exception as batch_error:
+                    print(f"Erro no lote contas pagas {i//batch_size + 1}: {batch_error}")
+                    # Tentar inserir um por um se der erro no lote
+                    for registro in batch:
+                        try:
+                            self.supabase.table("contas_pagas").insert(registro).execute()
+                            total_inseridos += 1
+                        except Exception as single_error:
+                            print(f"Erro ao inserir conta paga individual: {single_error}")
+                            continue
+            
+            # Preparar mensagem final
+            mensagem = f"{total_inseridos} contas pagas inseridas com sucesso!"
+            if verificar_duplicatas and duplicatas_info["duplicatas"] > 0:
+                mensagem += f" {duplicatas_info['duplicatas']} duplicatas ignoradas."
             
             return {
                 "success": True,
-                "registros_inseridos": len(registros),
-                "message": f"{len(registros)} contas pagas inseridas com sucesso!"
+                "registros_inseridos": total_inseridos,
+                "duplicatas_ignoradas": duplicatas_info["duplicatas"] if verificar_duplicatas else 0,
+                "message": mensagem
             }
             
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": "Erro ao inserir contas pagas."
+                "message": f"Erro ao inserir contas pagas: {str(e)}"
             }
     
     def buscar_contas_pagas(self, empresa: str = None, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
@@ -494,12 +590,71 @@ class SupabaseClient:
     
     # ==================== LIMPEZA DE DADOS ====================
     
+    def limpar_contas_a_pagar(self) -> Dict[str, Any]:
+        """Limpa apenas as contas a pagar do usuário."""
+        if not self.user_id:
+            return {"success": False, "error": "Usuário não autenticado"}
+        
+        try:
+            # Contar registros antes da limpeza
+            response = self.supabase.table("contas_a_pagar").select("id", count="exact").eq("usuario_id", self.user_id).execute()
+            total_antes = response.count if response.count else 0
+            
+            # Limpar contas a pagar
+            self.supabase.table("contas_a_pagar").delete().eq("usuario_id", self.user_id).execute()
+            
+            return {
+                "success": True,
+                "registros_removidos": total_antes,
+                "message": f"Removidos {total_antes} registros de contas a pagar."
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Erro ao limpar contas a pagar."
+            }
+    
+    def limpar_contas_pagas(self) -> Dict[str, Any]:
+        """Limpa apenas as contas pagas do usuário."""
+        if not self.user_id:
+            return {"success": False, "error": "Usuário não autenticado"}
+        
+        try:
+            # Contar registros antes da limpeza
+            response = self.supabase.table("contas_pagas").select("id", count="exact").eq("usuario_id", self.user_id).execute()
+            total_antes = response.count if response.count else 0
+            
+            # Limpar contas pagas
+            self.supabase.table("contas_pagas").delete().eq("usuario_id", self.user_id).execute()
+            
+            return {
+                "success": True,
+                "registros_removidos": total_antes,
+                "message": f"Removidos {total_antes} registros de contas pagas."
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Erro ao limpar contas pagas."
+            }
+    
     def limpar_dados_usuario(self) -> Dict[str, Any]:
         """Limpa todos os dados do usuário (use com cuidado!)."""
         if not self.user_id:
             return {"success": False, "error": "Usuário não autenticado"}
         
         try:
+            # Contar total de registros antes da limpeza
+            contas_a_pagar = self.supabase.table("contas_a_pagar").select("id", count="exact").eq("usuario_id", self.user_id).execute()
+            contas_pagas = self.supabase.table("contas_pagas").select("id", count="exact").eq("usuario_id", self.user_id).execute()
+            
+            total_a_pagar = contas_a_pagar.count if contas_a_pagar.count else 0
+            total_pagas = contas_pagas.count if contas_pagas.count else 0
+            
             # Limpar tabelas na ordem correta (devido às foreign keys)
             self.supabase.table("correspondencias").delete().eq("usuario_id", self.user_id).execute()
             self.supabase.table("processamentos").delete().eq("usuario_id", self.user_id).execute()
@@ -509,7 +664,9 @@ class SupabaseClient:
             
             return {
                 "success": True,
-                "message": "Todos os dados do usuário foram removidos."
+                "contas_a_pagar_removidas": total_a_pagar,
+                "contas_pagas_removidas": total_pagas,
+                "message": f"Removidos {total_a_pagar} contas a pagar e {total_pagas} contas pagas."
             }
             
         except Exception as e:
@@ -518,3 +675,93 @@ class SupabaseClient:
                 "error": str(e),
                 "message": "Erro ao limpar dados do usuário."
             }
+    
+    # ==================== VERIFICAÇÃO DE DUPLICATAS ====================
+    
+    def verificar_duplicatas_contas_a_pagar(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Verifica se existem duplicatas nas contas a pagar antes de inserir."""
+        if not self.user_id:
+            return {"duplicatas": 0, "novos": len(df)}
+        
+        try:
+            duplicatas = 0
+            novos_registros = []
+            
+            for _, row in df.iterrows():
+                # Criar chave única baseada nos campos principais
+                empresa = str(row.get('empresa', '')).strip()
+                valor = float(row.get('valor', 0)) if not pd.isna(row.get('valor', 0)) else 0
+                descricao = str(row.get('descricao', '')).strip()
+                
+                # Tratar data
+                data_vencimento = row.get('data_vencimento', '')
+                if pd.isna(data_vencimento):
+                    data_vencimento = '2025-01-01'
+                else:
+                    if hasattr(data_vencimento, 'strftime'):
+                        data_vencimento = data_vencimento.strftime('%Y-%m-%d')
+                    else:
+                        data_vencimento = str(data_vencimento)
+                
+                # Verificar se já existe um registro similar
+                response = self.supabase.table("contas_a_pagar").select("id").eq("usuario_id", self.user_id).eq("empresa", empresa).eq("valor", valor).eq("data_vencimento", data_vencimento).eq("descricao", descricao).execute()
+                
+                if response.data and len(response.data) > 0:
+                    duplicatas += 1
+                else:
+                    novos_registros.append(row)
+            
+            return {
+                "duplicatas": duplicatas,
+                "novos": len(novos_registros),
+                "df_novos": pd.DataFrame(novos_registros) if novos_registros else pd.DataFrame()
+            }
+            
+        except Exception as e:
+            print(f"Erro ao verificar duplicatas: {e}")
+            # Em caso de erro, considerar todos como novos
+            return {"duplicatas": 0, "novos": len(df), "df_novos": df}
+    
+    def verificar_duplicatas_contas_pagas(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Verifica se existem duplicatas nas contas pagas antes de inserir."""
+        if not self.user_id:
+            return {"duplicatas": 0, "novos": len(df)}
+        
+        try:
+            duplicatas = 0
+            novos_registros = []
+            
+            for _, row in df.iterrows():
+                # Criar chave única baseada nos campos principais
+                empresa = str(row.get('empresa', '')).strip()
+                valor = float(row.get('valor', 0)) if not pd.isna(row.get('valor', 0)) else 0
+                descricao = str(row.get('descricao', '')).strip()
+                
+                # Tratar data
+                data_pagamento = row.get('data_pagamento', '')
+                if pd.isna(data_pagamento):
+                    data_pagamento = '2025-01-01'
+                else:
+                    if hasattr(data_pagamento, 'strftime'):
+                        data_pagamento = data_pagamento.strftime('%Y-%m-%d')
+                    else:
+                        data_pagamento = str(data_pagamento)
+                
+                # Verificar se já existe um registro similar
+                response = self.supabase.table("contas_pagas").select("id").eq("usuario_id", self.user_id).eq("empresa", empresa).eq("valor", valor).eq("data_pagamento", data_pagamento).eq("descricao", descricao).execute()
+                
+                if response.data and len(response.data) > 0:
+                    duplicatas += 1
+                else:
+                    novos_registros.append(row)
+            
+            return {
+                "duplicatas": duplicatas,
+                "novos": len(novos_registros),
+                "df_novos": pd.DataFrame(novos_registros) if novos_registros else pd.DataFrame()
+            }
+            
+        except Exception as e:
+            print(f"Erro ao verificar duplicatas: {e}")
+            # Em caso de erro, considerar todos como novos
+            return {"duplicatas": 0, "novos": len(df), "df_novos": df}

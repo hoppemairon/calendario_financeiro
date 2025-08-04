@@ -9,6 +9,8 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import os
+from utils import formatar_moeda_brasileira, formatar_data_brasileira
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,7 +38,7 @@ class ReportGenerator:
             Caminho do arquivo gerado
         """
         if nome_arquivo is None:
-            nome_arquivo = f"relatorio_financeiro_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            nome_arquivo = f"relatorio_financeiro_{datetime.now().strftime('%d%m%Y_%H%M%S')}.xlsx"
         
         arquivo_path = os.path.join(self.reports_path, nome_arquivo)
         
@@ -125,8 +127,8 @@ class ReportGenerator:
         """
         workbook = writer.book
         
-        # Formatos
-        formato_moeda = workbook.add_format({'num_format': 'R$ #,##0.00'})
+        # Formatos brasileiros
+        formato_moeda = workbook.add_format({'num_format': 'R$ #.##0,00'})
         formato_data = workbook.add_format({'num_format': 'dd/mm/yyyy'})
         formato_header = workbook.add_format({
             'bold': True,
@@ -270,8 +272,8 @@ class ReportGenerator:
                 ),
                 name=status,
                 text=df_status.apply(lambda row: 
-                    f"Data: {row['data_vencimento'].strftime('%d/%m/%Y')}<br>"
-                    f"Valor: R$ {row['valor']:,.2f}<br>"
+                    f"Data: {formatar_data_brasileira(row['data_vencimento'])}<br>"
+                    f"Valor: {formatar_moeda_brasileira(row['valor'])}<br>"
                     f"Quantidade: {row['quantidade']}", axis=1),
                 hovertemplate='%{text}<extra></extra>'
             ))
