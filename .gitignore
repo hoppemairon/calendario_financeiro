@@ -44,6 +44,9 @@ temp_*
 # Streamlit
 .streamlit/
 
+# Scripts de desenvolvimento (opcional - descomente se não quiser versioná-los)
+# dev_scripts/
+
 # Mantém a estrutura de diretórios vazios
 !data/contas_a_pagar/.gitkeep
 !data/contas_pagas/.gitkeep

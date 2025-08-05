@@ -1,9 +1,24 @@
-pandas>=2.0.0
-openpyxl>=3.1.0
+# Calendário Financeiro - Dependências Python
+
+# Framework Web
 streamlit>=1.28.0
-plotly>=5.15.0
+
+# Manipulação de Dados
+pandas>=2.0.0
 python-dateutil>=2.8.0
+
+# Processamento de Excel
+openpyxl>=3.1.0
 xlsxwriter>=3.1.0
+
+# Visualizações
+plotly>=5.15.0
+
+# Banco de Dados
 supabase>=2.0.0
+
+# Autenticação
 streamlit-authenticator>=0.3.0
+
+# Configuração
 python-dotenv>=1.0.0

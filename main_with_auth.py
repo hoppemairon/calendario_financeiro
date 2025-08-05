@@ -21,6 +21,86 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# CSS global para reduzir tamanho de todas as métricas
+st.markdown("""
+<style>
+/* CSS super agressivo para forçar tamanhos menores */
+div[data-testid="metric-container"], 
+.stMetric, 
+[data-testid="metric-container"] {
+    background-color: transparent !important;
+    border: none !important;
+    padding: 1px 0 !important;
+    margin: 1px 0 !important;
+    height: auto !important;
+    min-height: unset !important;
+}
+
+/* Labels das métricas */
+div[data-testid="metric-container"] > div:first-child,
+div[data-testid="metric-container"] > div[data-testid="metric-label"],
+.stMetric > div:first-child {
+    font-size: 0.5rem !important;
+    font-weight: normal !important;
+    color: #6b7280 !important;
+    line-height: 1.1 !important;
+    height: auto !important;
+    white-space: nowrap !important;
+}
+
+/* Valores das métricas */
+div[data-testid="metric-container"] > div:nth-child(2),
+div[data-testid="metric-container"] > div[data-testid="metric-value"],
+.stMetric > div:nth-child(2) {
+    font-size: 0.65rem !important;
+    font-weight: bold !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 1.0 !important;
+    height: auto !important;
+    white-space: nowrap !important;
+}
+
+/* Delta das métricas */
+div[data-testid="metric-container"] > div:last-child,
+div[data-testid="metric-container"] > div[data-testid="metric-delta"],
+.stMetric > div:last-child {
+    font-size: 0.45rem !important;
+    color: #9ca3af !important;
+    line-height: 1.0 !important;
+    height: auto !important;
+    white-space: nowrap !important;
+}
+
+/* Forçar em todos os spans e textos dentro das métricas */
+div[data-testid="metric-container"] span,
+div[data-testid="metric-container"] p,
+div[data-testid="metric-container"] div,
+.stMetric span,
+.stMetric p,
+.stMetric div {
+    font-size: 0.65rem !important;
+    line-height: 1.0 !important;
+    white-space: nowrap !important;
+}
+
+/* Especificamente para valores monetários */
+div[data-testid="metric-container"] div[data-testid="metric-value"] span,
+div[data-testid="metric-container"] div[data-testid="metric-value"] {
+    font-size: 0.65rem !important;
+    font-weight: bold !important;
+    line-height: 1.0 !important;
+}
+
+/* Forçar altura mínima pequena */
+div[data-testid="metric-container"],
+.stMetric {
+    max-height: 60px !important;
+    height: auto !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Adicionar src ao path
 sys.path.append('src')
 
@@ -458,7 +538,7 @@ def processar_arquivo_padrao(uploaded_file, processor):
 
 def criar_calendario_financeiro(df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame, mes: int = None, ano: int = None):
     """
-    Cria um calendário visual com informações financeiras.
+    Cria um calendário visual com informações financeiras em visualização semanal.
     
     Args:
         df_a_pagar: DataFrame com contas a pagar
@@ -484,119 +564,9 @@ def criar_calendario_financeiro(df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame
         df_pagas['data_pagamento'] = pd.to_datetime(df_pagas['data_pagamento'], errors='coerce')
         df_pagas = df_pagas.dropna(subset=['data_pagamento'])
     
-    # Obter informações do calendário
-    # Configurar para começar com domingo (padrão brasileiro)
-    calendar.setfirstweekday(calendar.SUNDAY)
-    cal = calendar.monthcalendar(ano, mes)
     nome_mes = obter_mes_nome_brasileiro(mes)
     
-    # Preparar dados agregados por dia
-    dados_calendario = {}
-    
-    def buscar_transferencias_do_mes_anterior(df, coluna_data, mes_atual, ano_atual):
-        """
-        Busca valores de fins de semana do mês anterior que foram transferidos para o mês atual.
-        """
-        transferencias = {}
-        
-        if df.empty:
-            return transferencias
-        
-        # Calcular mês anterior
-        if mes_atual == 1:
-            mes_anterior = 12
-            ano_anterior = ano_atual - 1
-        else:
-            mes_anterior = mes_atual - 1
-            ano_anterior = ano_atual
-        
-        # Buscar dados do mês anterior
-        df_mes_anterior = df[
-            (df[coluna_data].dt.month == mes_anterior) & 
-            (df[coluna_data].dt.year == ano_anterior)
-        ]
-        
-        for _, row in df_mes_anterior.iterrows():
-            data_original = row[coluna_data]
-            data_ajustada = ajustar_para_dia_util(data_original)
-            
-            # Se a data ajustada caiu no mês atual, é uma transferência
-            if data_ajustada.month == mes_atual and data_ajustada.year == ano_atual:
-                dia = data_ajustada.day
-                
-                if dia not in transferencias:
-                    transferencias[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-                
-                # Determinar se é conta a pagar ou paga baseado na coluna
-                if coluna_data == 'data_vencimento':
-                    transferencias[dia]['a_pagar'] += float(row['valor'])
-                    transferencias[dia]['qtd_a_pagar'] += 1
-                else:  # data_pagamento
-                    transferencias[dia]['pagas'] += float(row['valor'])
-                    transferencias[dia]['qtd_pagas'] += 1
-        
-        return transferencias
-    
-    # Processar contas a pagar
-    if not df_a_pagar.empty:
-        df_mes_a_pagar = df_a_pagar[
-            (df_a_pagar['data_vencimento'].dt.month == mes) & 
-            (df_a_pagar['data_vencimento'].dt.year == ano)
-        ]
-        
-        for _, row in df_mes_a_pagar.iterrows():
-            data_original = row['data_vencimento']
-            data_ajustada = ajustar_para_dia_util(data_original)
-            
-            # Só processar se a data ajustada ainda estiver no mês atual
-            # Se sair do mês, significa que foi transferida para o próximo mês
-            if data_ajustada.month == mes and data_ajustada.year == ano:
-                dia = data_ajustada.day
-                
-                if dia not in dados_calendario:
-                    dados_calendario[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-                dados_calendario[dia]['a_pagar'] += float(row['valor'])
-                dados_calendario[dia]['qtd_a_pagar'] += 1
-    
-    # Processar contas pagas
-    if not df_pagas.empty:
-        df_mes_pagas = df_pagas[
-            (df_pagas['data_pagamento'].dt.month == mes) & 
-            (df_pagas['data_pagamento'].dt.year == ano)
-        ]
-        
-        for _, row in df_mes_pagas.iterrows():
-            data_original = row['data_pagamento']
-            data_ajustada = ajustar_para_dia_util(data_original)
-            
-            # Só processar se a data ajustada ainda estiver no mês atual
-            # Se sair do mês, significa que foi transferida para o próximo mês
-            if data_ajustada.month == mes and data_ajustada.year == ano:
-                dia = data_ajustada.day
-                
-                if dia not in dados_calendario:
-                    dados_calendario[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-                dados_calendario[dia]['pagas'] += float(row['valor'])
-                dados_calendario[dia]['qtd_pagas'] += 1
-    
-    # Buscar transferências do mês anterior (fins de semana que viraram para este mês)
-    transferencias_a_pagar = buscar_transferencias_do_mes_anterior(df_a_pagar, 'data_vencimento', mes, ano)
-    transferencias_pagas = buscar_transferencias_do_mes_anterior(df_pagas, 'data_pagamento', mes, ano)
-    
-    # Aplicar transferências
-    for dia, valores in transferencias_a_pagar.items():
-        if dia not in dados_calendario:
-            dados_calendario[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-        dados_calendario[dia]['a_pagar'] += valores['a_pagar']
-        dados_calendario[dia]['qtd_a_pagar'] += valores['qtd_a_pagar']
-    
-    for dia, valores in transferencias_pagas.items():
-        if dia not in dados_calendario:
-            dados_calendario[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-        dados_calendario[dia]['pagas'] += valores['pagas']
-        dados_calendario[dia]['qtd_pagas'] += valores['qtd_pagas']
-    
-    # Criar título
+    # Criar título e seletores
     st.subheader(f"📅 Calendário Financeiro - {nome_mes} {ano}")
     
     # Seletor de mês/ano
@@ -612,216 +582,38 @@ def criar_calendario_financeiro(df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame
     with col_ano:
         novo_ano = st.number_input("Ano", min_value=2020, max_value=2030, value=ano, key="ano_calendario")
     
-    # Se mudou mês ou ano, usar os novos valores
+    # Se mudou mês ou ano, atualizar
     if novo_mes != mes or novo_ano != ano:
         mes = novo_mes
         ano = novo_ano
-        # Recalcular calendário com novos valores (mantendo domingo como primeiro dia)
-        calendar.setfirstweekday(calendar.SUNDAY)
-        cal = calendar.monthcalendar(ano, mes)
         nome_mes = obter_mes_nome_brasileiro(mes)
-        
-        # Recalcular dados do mês
-        dados_calendario = {}
-        
-        # Processar contas a pagar
-        if not df_a_pagar.empty:
-            df_mes_a_pagar = df_a_pagar[
-                (df_a_pagar['data_vencimento'].dt.month == mes) & 
-                (df_a_pagar['data_vencimento'].dt.year == ano)
-            ]
-            
-            for _, row in df_mes_a_pagar.iterrows():
-                data_original = row['data_vencimento']
-                data_ajustada = ajustar_para_dia_util(data_original)
-                
-                # Só processar se a data ajustada ainda estiver no mês atual
-                # Se sair do mês, significa que foi transferida para o próximo mês
-                if data_ajustada.month == mes and data_ajustada.year == ano:
-                    dia = data_ajustada.day
-                    
-                    if dia not in dados_calendario:
-                        dados_calendario[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-                    dados_calendario[dia]['a_pagar'] += float(row['valor'])
-                    dados_calendario[dia]['qtd_a_pagar'] += 1
-        
-        # Processar contas pagas
-        if not df_pagas.empty:
-            df_mes_pagas = df_pagas[
-                (df_pagas['data_pagamento'].dt.month == mes) & 
-                (df_pagas['data_pagamento'].dt.year == ano)
-            ]
-            
-            for _, row in df_mes_pagas.iterrows():
-                data_original = row['data_pagamento']
-                data_ajustada = ajustar_para_dia_util(data_original)
-                
-                # Só processar se a data ajustada ainda estiver no mês atual
-                # Se sair do mês, significa que foi transferida para o próximo mês
-                if data_ajustada.month == mes and data_ajustada.year == ano:
-                    dia = data_ajustada.day
-                    
-                    if dia not in dados_calendario:
-                        dados_calendario[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-                    dados_calendario[dia]['pagas'] += float(row['valor'])
-                    dados_calendario[dia]['qtd_pagas'] += 1
-        
-        # Buscar transferências do mês anterior (fins de semana que viraram para este mês)
-        transferencias_a_pagar = buscar_transferencias_do_mes_anterior(df_a_pagar, 'data_vencimento', mes, ano)
-        transferencias_pagas = buscar_transferencias_do_mes_anterior(df_pagas, 'data_pagamento', mes, ano)
-        
-        # Aplicar transferências
-        for dia, valores in transferencias_a_pagar.items():
-            if dia not in dados_calendario:
-                dados_calendario[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-            dados_calendario[dia]['a_pagar'] += valores['a_pagar']
-            dados_calendario[dia]['qtd_a_pagar'] += valores['qtd_a_pagar']
-        
-        for dia, valores in transferencias_pagas.items():
-            if dia not in dados_calendario:
-                dados_calendario[dia] = {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0}
-            dados_calendario[dia]['pagas'] += valores['pagas']
-            dados_calendario[dia]['qtd_pagas'] += valores['qtd_pagas']
     
-    # Criar grid do calendário
+    # Calcular semanas do mês
+    semanas = calcular_semanas_do_mes(ano, mes)
+    
+    # Seletor de semana
     st.markdown("---")
-    st.markdown("### 📋 Legenda:")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown("🔴 **A Pagar** - Valores pendentes")
-    with col2:
-        st.markdown("🟢 **Pago** - Valores pagos")
-    with col3:
-        st.markdown("🔵 **Diferença** - Pago - A Pagar")
-    with col4:
-        st.markdown("📅 **Hoje** - Dia atual (azul)")
+    st.markdown("### 📅 Selecione a Semana")
     
-    st.info("💡 **Regra de Negócio**: Valores de sábados e domingos são automaticamente transferidos para a próxima segunda-feira.")
+    opcoes_semanas = []
+    for i, semana in enumerate(semanas):
+        inicio = semana['inicio'].strftime('%d/%m')
+        fim = semana['fim'].strftime('%d/%m')
+        opcoes_semanas.append(f"Semana {i+1}: {inicio} - {fim}")
     
-    # Criar tabela do calendário
-    dias_semana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+    semana_selecionada_idx = st.selectbox(
+        "Semana",
+        range(len(opcoes_semanas)),
+        format_func=lambda x: opcoes_semanas[x],
+        key="semana_selecionada"
+    )
     
-    # Cabeçalho dos dias da semana
-    st.markdown("---")
-    cols = st.columns(7)
-    for i, dia in enumerate(dias_semana):
-        with cols[i]:
-            st.markdown(f"""
-            <div style="
-                text-align: center; 
-                font-weight: bold; 
-                padding: 10px; 
-                background-color: #f8f9fa; 
-                border-radius: 5px; 
-                margin-bottom: 5px;
-                color: #495057;
-            ">
-                {dia}
-            </div>
-            """, unsafe_allow_html=True)
+    semana_selecionada = semanas[semana_selecionada_idx]
     
-    # Criar linhas do calendário
-    for semana in cal:
-        cols = st.columns(7)
-        for i, dia in enumerate(semana):
-            with cols[i]:
-                if dia == 0:  # Dia vazio
-                    st.markdown("""
-                    <div style="
-                        padding: 8px; 
-                        margin: 2px;
-                        min-height: 100px;
-                    ">
-                        &nbsp;
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    # Obter dados do dia
-                    dados_dia = dados_calendario.get(dia, {'a_pagar': 0, 'pagas': 0, 'qtd_a_pagar': 0, 'qtd_pagas': 0})
-                    
-                    # Determinar cor de fundo baseada na atividade
-                    cor_fundo = "#f0f0f0"  # Cinza claro padrão
-                    
-                    # Verificar se é fim de semana
-                    data_dia = datetime(ano, mes, dia)
-                    eh_fim_de_semana = data_dia.weekday() >= 5  # 5=sábado, 6=domingo
-                    
-                    if dados_dia['a_pagar'] > 0 and dados_dia['pagas'] == 0:
-                        cor_fundo = "#ffebee"  # Vermelho claro (só a pagar)
-                    elif dados_dia['pagas'] > 0 and dados_dia['a_pagar'] == 0:
-                        cor_fundo = "#e8f5e8"  # Verde claro (só pagas)
-                    elif dados_dia['a_pagar'] > 0 and dados_dia['pagas'] > 0:
-                        cor_fundo = "#fff3e0"  # Laranja claro (ambos)
-                    
-                    # Destacar fim de semana com valores zerados (transferidos)
-                    if eh_fim_de_semana and dados_dia['a_pagar'] == 0 and dados_dia['pagas'] == 0:
-                        cor_fundo = "#f5f5f5"  # Cinza mais escuro para fim de semana
-                    
-                    # Verificar se é hoje
-                    if dia == hoje.day and mes == hoje.month and ano == hoje.year:
-                        cor_fundo = "#e3f2fd"  # Azul claro para hoje
-                    
-                    # Criar conteúdo do dia
-                    diferenca = dados_dia['pagas'] - dados_dia['a_pagar']
-                    
-                    if dados_dia['a_pagar'] > 0 or dados_dia['pagas'] > 0:
-                        # Container com dados financeiros
-                        
-                        # Verificar se é segunda-feira (pode ter recebido transferências)
-                        data_dia = datetime(ano, mes, dia)
-                        eh_segunda = data_dia.weekday() == 0
-                        indicador_transferencia = "📈 " if eh_segunda else ""
-                        
-                        # Criar botão clicável para o dia
-                        if st.button(
-                            f"{indicador_transferencia}{dia}",
-                            key=f"dia_{dia}_{mes}_{ano}",
-                            help=f"Ver detalhes do dia {dia:02d}/{mes:02d}/{ano}",
-                            use_container_width=True
-                        ):
-                            # Armazenar o dia selecionado no session state
-                            st.session_state['dia_selecionado'] = {
-                                'dia': dia,
-                                'mes': mes,
-                                'ano': ano,
-                                'dados': dados_dia
-                            }
-                        
-                        # Mostrar resumo visual do dia
-                        st.markdown(f"""
-                        <div style="
-                            background-color: {cor_fundo}; 
-                            padding: 4px; 
-                            border-radius: 4px; 
-                            margin: 2px 0;
-                            text-align: center;
-                            font-size: 10px;
-                        ">
-                            <div style="color: #d32f2f;">A Pagar: {formatar_moeda_brasileira(dados_dia['a_pagar'], com_simbolo=False)}</div>
-                            <div style="color: #388e3c;">Pago: {formatar_moeda_brasileira(dados_dia['pagas'], com_simbolo=False)}</div>
-                            <div style="color: #1976d2; font-weight: bold;">Dif: {formatar_moeda_brasileira(diferenca, com_simbolo=False)}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        # Dia sem dados
-                        st.markdown(f"""
-                        <div style="
-                            background-color: {cor_fundo}; 
-                            padding: 8px; 
-                            border-radius: 8px; 
-                            margin: 2px;
-                            min-height: 100px;
-                            border: 1px solid #eee;
-                            text-align: center;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                        ">
-                            <div style="font-weight: bold; font-size: 16px; color: #666;">
-                                {dia}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+    # Mostrar calendário semanal
+    mostrar_calendario_semanal(
+        semana_selecionada, df_a_pagar, df_pagas, mes, ano
+    )
     
     # Mostrar detalhes do dia selecionado
     if 'dia_selecionado' in st.session_state:
@@ -943,6 +735,7 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
     
     # Resumo do dia
     st.markdown("### 📊 Resumo do Dia")
+    
     col1, col2, col3 = st.columns(3)
     
     total_a_pagar = sum(conta['valor'] for conta in contas_a_pagar_dia)
@@ -1642,6 +1435,463 @@ def executar_auditoria_completa(arquivo_excel, supabase_client):
         if 'temp_path' in locals():
             remover_arquivo_temporario(temp_path)
 
+def calcular_semanas_do_mes(ano, mes):
+    """
+    Calcula todas as semanas de um mês específico.
+    Retorna lista com informações de cada semana.
+    """
+    import calendar
+    
+    # Configurar para começar com domingo
+    calendar.setfirstweekday(calendar.SUNDAY)
+    cal = calendar.monthcalendar(ano, mes)
+    
+    semanas = []
+    
+    for semana_idx, semana in enumerate(cal):
+        # Encontrar primeiro e último dia da semana que pertencem ao mês
+        dias_validos = [dia for dia in semana if dia != 0]
+        
+        if dias_validos:
+            primeiro_dia = min(dias_validos)
+            ultimo_dia = max(dias_validos)
+            
+            inicio = datetime(ano, mes, primeiro_dia)
+            fim = datetime(ano, mes, ultimo_dia)
+            
+            semanas.append({
+                'numero': semana_idx + 1,
+                'inicio': inicio,
+                'fim': fim,
+                'dias': dias_validos
+            })
+    
+    return semanas
+
+def mostrar_calendario_semanal(semana_info, df_a_pagar, df_pagas, mes, ano):
+    """
+    Mostra o calendário da semana selecionada com informações financeiras detalhadas.
+    """
+    # CSS global para reduzir botões do calendário
+    st.markdown("""
+    <style>
+    /* Aplicar estilos específicos para botões do calendário */
+    div[data-testid="stButton"] > button,
+    .stButton > button,
+    button[kind="primary"],
+    button[kind="secondary"] {
+        font-size: 0.55rem !important;
+        padding: 3px 6px !important;
+        height: auto !important;
+        min-height: 24px !important;
+        max-height: 32px !important;
+        border-radius: 4px !important;
+        font-weight: 500 !important;
+        border: 1px solid #cbd5e1 !important;
+        background: #f8fafc !important;
+        color: #475569 !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+    div[data-testid="stButton"] > button:hover,
+    .stButton > button:hover {
+        background: #e2e8f0 !important;
+        border-color: #94a3b8 !important;
+        transform: none !important;
+    }
+    /* Força aplicação em todos os contextos */
+    .stApp button {
+        font-size: 0.55rem !important;
+        padding: 3px 6px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.markdown(f"### 📅 Semana {semana_info['numero']} - {semana_info['inicio'].strftime('%d/%m')} a {semana_info['fim'].strftime('%d/%m')}")
+    
+    # Calcular dados da semana
+    dados_semana = calcular_dados_semana(semana_info, df_a_pagar, df_pagas, mes, ano)
+    
+    # Mostrar legenda
+    st.markdown("#### 📋 Legenda:")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown("🔴 **A Pagar** - Valores pendentes")
+    with col2:
+        st.markdown("🟢 **Pago** - Valores pagos")
+    with col3:
+        st.markdown("🔵 **Diferença** - Pago - A Pagar")
+    with col4:
+        st.markdown("📅 **Hoje** - Dia atual (destaque azul)")
+    
+    st.info("💡 **Regra de Negócio**: Valores de sábados e domingos são automaticamente transferidos para a próxima segunda-feira.")
+    
+    # Criar grid da semana
+    dias_semana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+    
+    # Cabeçalho dos dias da semana
+    cols_header = st.columns(7)
+    for i, dia_nome in enumerate(dias_semana):
+        with cols_header[i]:
+            st.markdown(f"""
+            <div style="
+                text-align: center; 
+                font-weight: bold; 
+                padding: 12px 8px; 
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border-radius: 8px; 
+                margin-bottom: 8px;
+                font-size: 14px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            ">
+                {dia_nome}
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Criar linha da semana
+    cols_semana = st.columns(7)
+    
+    # Preencher dias da semana
+    for dia_semana_idx in range(7):  # 0=domingo, 6=sábado
+        with cols_semana[dia_semana_idx]:
+            # Verificar se existe dia válido para esta posição na semana
+            dia_mes = None
+            
+            # Encontrar o dia do mês correspondente a esta posição da semana
+            for dia in semana_info['dias']:
+                data_dia = datetime(ano, mes, dia)
+                if data_dia.weekday() == (dia_semana_idx - 1) % 7:  # Ajustar porque datetime usa segunda=0
+                    dia_mes = dia
+                    break
+            
+            if dia_mes:
+                mostrar_dia_semana(dia_mes, dados_semana.get(dia_mes, {}), mes, ano)
+            else:
+                # Dia vazio
+                st.markdown("""
+                <div style="
+                    padding: 20px; 
+                    margin: 4px 0;
+                    min-height: 180px;
+                    background: #f8fafc;
+                    border: 2px dashed #cbd5e1;
+                    border-radius: 12px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #94a3b8;
+                    font-style: italic;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                ">
+                    <span style='font-size: 14px;'>Dia não pertence ao mês</span>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    # Resumo da semana
+    mostrar_resumo_semana(dados_semana, semana_info)
+
+def calcular_dados_semana(semana_info, df_a_pagar, df_pagas, mes, ano):
+    """
+    Calcula os dados financeiros para cada dia da semana.
+    """
+    dados_semana = {}
+    
+    for dia in semana_info['dias']:
+        dados_semana[dia] = {
+            'a_pagar': 0,
+            'pagas': 0,
+            'qtd_a_pagar': 0,
+            'qtd_pagas': 0,
+            'contas_a_pagar': [],
+            'contas_pagas': []
+        }
+    
+    # Processar contas a pagar
+    if not df_a_pagar.empty:
+        for _, row in df_a_pagar.iterrows():
+            data_original = pd.to_datetime(row['data_vencimento'], errors='coerce')
+            if pd.notna(data_original):
+                data_ajustada = ajustar_para_dia_util(data_original)
+                
+                # Verificar se a data ajustada está na semana atual
+                if (data_ajustada.month == mes and 
+                    data_ajustada.year == ano and 
+                    data_ajustada.day in semana_info['dias']):
+                    
+                    dia = data_ajustada.day
+                    valor = float(row['valor'])
+                    
+                    dados_semana[dia]['a_pagar'] += valor
+                    dados_semana[dia]['qtd_a_pagar'] += 1
+                    dados_semana[dia]['contas_a_pagar'].append({
+                        'empresa': row['empresa'],
+                        'fornecedor': row.get('fornecedor', 'N/A'),
+                        'valor': valor,
+                        'descricao': row['descricao'],
+                        'data_original': data_original.strftime('%d/%m/%Y'),
+                        'transferida': data_original.date() != data_ajustada.date()
+                    })
+    
+    # Processar contas pagas
+    if not df_pagas.empty:
+        for _, row in df_pagas.iterrows():
+            data_original = pd.to_datetime(row['data_pagamento'], errors='coerce')
+            if pd.notna(data_original):
+                data_ajustada = ajustar_para_dia_util(data_original)
+                
+                # Verificar se a data ajustada está na semana atual
+                if (data_ajustada.month == mes and 
+                    data_ajustada.year == ano and 
+                    data_ajustada.day in semana_info['dias']):
+                    
+                    dia = data_ajustada.day
+                    valor = float(row['valor'])
+                    
+                    dados_semana[dia]['pagas'] += valor
+                    dados_semana[dia]['qtd_pagas'] += 1
+                    dados_semana[dia]['contas_pagas'].append({
+                        'empresa': row['empresa'],
+                        'fornecedor': row.get('fornecedor', 'N/A'),
+                        'valor': valor,
+                        'descricao': row['descricao'],
+                        'data_original': data_original.strftime('%d/%m/%Y'),
+                        'transferida': data_original.date() != data_ajustada.date()
+                    })
+    
+    return dados_semana
+
+def mostrar_dia_semana(dia, dados_dia, mes, ano):
+    """
+    Mostra um dia específico na visualização semanal.
+    """
+    from datetime import datetime
+    
+    hoje = datetime.now()
+    
+    # Determinar cor de fundo baseada na atividade
+    cor_fundo = "#f8f9fa"  # Cinza claro padrão
+    cor_borda = "#dee2e6"
+    
+    # Verificar se é fim de semana
+    data_dia = datetime(ano, mes, dia)
+    eh_fim_de_semana = data_dia.weekday() >= 5  # 5=sábado, 6=domingo
+    
+    if dados_dia.get('a_pagar', 0) > 0 and dados_dia.get('pagas', 0) == 0:
+        cor_fundo = "#fff5f5"  # Vermelho muito claro (só a pagar)
+        cor_borda = "#fca5a5"
+    elif dados_dia.get('pagas', 0) > 0 and dados_dia.get('a_pagar', 0) == 0:
+        cor_fundo = "#f0fdf4"  # Verde muito claro (só pagas)
+        cor_borda = "#86efac"
+    elif dados_dia.get('a_pagar', 0) > 0 and dados_dia.get('pagas', 0) > 0:
+        cor_fundo = "#fffbeb"  # Laranja muito claro (ambos)
+        cor_borda = "#fbbf24"
+    
+    # Destacar fim de semana com valores zerados (transferidos)
+    if eh_fim_de_semana and dados_dia.get('a_pagar', 0) == 0 and dados_dia.get('pagas', 0) == 0:
+        cor_fundo = "#f1f5f9"  # Cinza azulado para fim de semana
+        cor_borda = "#cbd5e1"
+    
+    # Verificar se é hoje
+    if dia == hoje.day and mes == hoje.month and ano == hoje.year:
+        cor_fundo = "#dbeafe"  # Azul claro para hoje
+        cor_borda = "#60a5fa"
+    
+    # Calcular diferença
+    diferenca = dados_dia.get('pagas', 0) - dados_dia.get('a_pagar', 0)
+    
+    # Definir ícones baseados no contexto do dia
+    icone_dia = ""
+    
+    # Verificar se é hoje (prioridade máxima)
+    if dia == hoje.day and mes == hoje.month and ano == hoje.year:
+        icone_dia = "📅"  # Ícone para o dia atual
+    # Verificar se é segunda-feira (pode ter recebido transferências)
+    elif data_dia.weekday() == 0:
+        icone_dia = "📈"  # Ícone para segunda-feira (transferências)
+    
+    if dados_dia.get('a_pagar', 0) > 0 or dados_dia.get('pagas', 0) > 0:
+        # Usar componentes nativos do Streamlit ao invés de HTML
+        with st.container():
+            # Criar um container com estilo baseado na atividade
+            if dia == hoje.day and mes == hoje.month and ano == hoje.year:
+                st.markdown(f"<div style='text-align: center; font-weight: bold; margin-bottom: 8px;'>📅 {dia}(Hoje)</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div style='text-align: center; font-weight: bold; margin-bottom: 8px;'>{dia}</div>", unsafe_allow_html=True)
+            
+            # Usar HTML personalizado ao invés de st.metric para controle total do tamanho
+            a_pagar_valor = formatar_moeda_brasileira(dados_dia.get('a_pagar', 0), com_simbolo=False)
+            a_pagar_qtd = dados_dia.get('qtd_a_pagar', 0)
+            pago_valor = formatar_moeda_brasileira(dados_dia.get('pagas', 0), com_simbolo=False)
+            pago_qtd = dados_dia.get('qtd_pagas', 0)
+        
+            st.markdown(f"""
+            <div style="margin: 4px 0; padding: 4px; border-radius: 4px; background: #fff5f5;">
+                <div style="font-size: 0.5rem; font-weight: normal; color: #dc2626; margin-bottom: 1px;">🔴 A Pagar</div>
+                <div style="font-size: 0.65rem; font-weight: bold; color: #dc2626; margin-bottom: 1px;">{a_pagar_valor}</div>
+                <div style="font-size: 0.45rem; color: #9ca3af;">{a_pagar_qtd} contas</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown(f"""
+            <div style="margin: 4px 0; padding: 4px; border-radius: 4px; background: #f0fdf4;">
+                <div style="font-size: 0.5rem; font-weight: normal; color: #16a34a; margin-bottom: 1px;">🟢 Pago</div>
+                <div style="font-size: 0.65rem; font-weight: bold; color: #16a34a; margin-bottom: 1px;">{pago_valor}</div>
+                <div style="font-size: 0.45rem; color: #9ca3af;">{pago_qtd} contas</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Diferença com quadro igual aos outros componentes
+            diferenca_valor = formatar_moeda_brasileira(diferenca, com_simbolo=False)
+            icone_diferenca = "🔺" if diferenca > 0 else "🔻" if diferenca < 0 else "➖"
+            cor_diferenca = "#16a34a" if diferenca > 0 else "#dc2626" if diferenca < 0 else "#6b7280"
+            cor_fundo_diferenca = "#f0fdf4" if diferenca > 0 else "#fff5f5" if diferenca < 0 else "#f8fafc"
+            
+            st.markdown(f"""
+            <div style="margin: 4px 0; padding: 4px; border-radius: 4px; background: {cor_fundo_diferenca};">
+                <div style="font-size: 0.5rem; font-weight: normal; color: {cor_diferenca}; margin-bottom: 1px;">{icone_diferenca} Diferença</div>
+                <div style="font-size: 0.65rem; font-weight: bold; color: {cor_diferenca}; margin-bottom: 1px;">{diferenca_valor}</div>
+                <div style="font-size: 0.45rem; color: #9ca3af;">Pago - A Pagar</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Botão para ver detalhes do dia
+        if st.button(
+            f"📋 Dia {dia}",
+            key=f"dia_semanal_{dia}_{mes}_{ano}",
+            help=f"Ver detalhes do dia {dia:02d}/{mes:02d}/{ano}",
+            use_container_width=True
+        ):
+            st.session_state['dia_selecionado'] = {
+                'dia': dia,
+                'mes': mes,
+                'ano': ano
+            }
+            st.rerun()
+     
+    else:
+        # Dia sem dados com design proporcional aos dias com dados
+        container_vazio = f"""
+        <div style="
+            background: {cor_fundo};
+            border: 2px solid {cor_borda};
+            border-radius: 12px;
+            padding: 8px;
+            margin: 4px 0;
+            min-height: 200px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        ">
+            <div style="
+                font-size: 18px; 
+                font-weight: bold; 
+                color: #6b7280; 
+                margin-bottom: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 4px;
+            ">
+                {icone_dia} {dia}
+            </div>
+            <div style="
+                font-size: 0.6rem; 
+                color: #9ca3af;
+                font-style: italic;
+                padding: 12px;
+                background: #f8fafc;
+                border-radius: 6px;
+                border: 1px dashed #cbd5e1;
+                margin: 8px 0;
+            ">
+                Sem movimentação
+            </div>
+            <div style="
+                font-size: 0.6rem;
+                padding: 3px 8px;
+                border: 1px solid #e2e8f0;
+                border-radius: 4px;
+                background: #f1f5f9;
+                color: #64748b;
+                margin-top: 8px;
+            ">
+                📋 {dia}
+            </div>
+        </div>
+        """
+        st.markdown(container_vazio, unsafe_allow_html=True)
+
+def mostrar_resumo_semana(dados_semana, semana_info):
+    """
+    Mostra o resumo financeiro da semana.
+    """
+    st.markdown("---")
+    st.markdown("### 📊 Resumo da Semana")
+    
+    # Calcular totais da semana
+    total_a_pagar = sum(dados_dia.get('a_pagar', 0) for dados_dia in dados_semana.values())
+    total_pagas = sum(dados_dia.get('pagas', 0) for dados_dia in dados_semana.values())
+    total_contas_a_pagar = sum(dados_dia.get('qtd_a_pagar', 0) for dados_dia in dados_semana.values())
+    total_contas_pagas = sum(dados_dia.get('qtd_pagas', 0) for dados_dia in dados_semana.values())
+    diferenca_semana = total_pagas - total_a_pagar
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Usar HTML personalizado para controle total do tamanho
+    with col1:
+        valor_a_pagar = formatar_moeda_brasileira(total_a_pagar)
+        st.markdown(f"""
+        <div style="padding: 8px; border-radius: 6px; background: #fff5f5; border: 1px solid #fecaca;">
+            <div style="font-size: 0.55rem; font-weight: normal; color: #dc2626; margin-bottom: 2px;">💸 Total a Pagar</div>
+            <div style="font-size: 0.75rem; font-weight: bold; color: #dc2626; margin-bottom: 2px;">{valor_a_pagar}</div>
+            <div style="font-size: 0.5rem; color: #9ca3af;">{total_contas_a_pagar} contas</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        valor_pago = formatar_moeda_brasileira(total_pagas)
+        st.markdown(f"""
+        <div style="padding: 8px; border-radius: 6px; background: #f0fdf4; border: 1px solid #bbf7d0;">
+            <div style="font-size: 0.55rem; font-weight: normal; color: #16a34a; margin-bottom: 2px;">✅ Total Pago</div>
+            <div style="font-size: 0.75rem; font-weight: bold; color: #16a34a; margin-bottom: 2px;">{valor_pago}</div>
+            <div style="font-size: 0.5rem; color: #9ca3af;">{total_contas_pagas} contas</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        valor_diferenca = formatar_moeda_brasileira(diferenca_semana)
+        cor_fundo = "#f0fdf4" if diferenca_semana >= 0 else "#fff5f5"
+        cor_borda = "#bbf7d0" if diferenca_semana >= 0 else "#fecaca"
+        cor_texto = "#16a34a" if diferenca_semana >= 0 else "#dc2626"
+        status_texto = "✅ Positivo" if diferenca_semana >= 0 else "❌ Negativo"
+        
+        st.markdown(f"""
+        <div style="padding: 8px; border-radius: 6px; background: {cor_fundo}; border: 1px solid {cor_borda};">
+            <div style="font-size: 0.55rem; font-weight: normal; color: {cor_texto}; margin-bottom: 2px;">📊 Saldo da Semana</div>
+            <div style="font-size: 0.75rem; font-weight: bold; color: {cor_texto}; margin-bottom: 2px;">{valor_diferenca}</div>
+            <div style="font-size: 0.5rem; color: #9ca3af;">{status_texto}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        dias_com_movimento = len([d for d in dados_semana.values() if d.get('a_pagar', 0) > 0 or d.get('pagas', 0) > 0])
+        percentual = round(dias_com_movimento/len(semana_info['dias'])*100)
+        
+        st.markdown(f"""
+        <div style="padding: 8px; border-radius: 6px; background: #f1f5f9; border: 1px solid #cbd5e1;">
+            <div style="font-size: 0.55rem; font-weight: normal; color: #475569; margin-bottom: 2px;">📅 Dias com Movimento</div>
+            <div style="font-size: 0.75rem; font-weight: bold; color: #475569; margin-bottom: 2px;">{dias_com_movimento}/{len(semana_info['dias'])}</div>
+            <div style="font-size: 0.5rem; color: #9ca3af;">{percentual}% da semana</div>
+        </div>
+        """, unsafe_allow_html=True)
+
 def ajustar_para_dia_util(data_original):
     """
     Ajusta datas de fim de semana para a próxima segunda-feira.
@@ -1663,14 +1913,14 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
     """Mostra dados carregados do banco."""
     
     # Tabs para diferentes visões
-    tab1, tab2, tab3, tab4 = st.tabs(["� Calendário", "�📊 Dados Atuais", "🏢 Por Empresa", "📋 Exportar"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🗓️ Calendário", "📊 Dados Atuais", "🏢 Por Empresa", "📋 Exportar"])
     
     # Buscar dados uma vez para usar em todas as abas
     df_a_pagar = supabase_client.buscar_contas_a_pagar()
     df_pagas = supabase_client.buscar_contas_pagas()
     
     with tab1:
-        st.header("📅 Calendário Financeiro")
+        #st.header("📅 Calendário Financeiro")
         criar_calendario_financeiro(df_a_pagar, df_pagas)
     
     with tab2:

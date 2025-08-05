@@ -1,109 +1,158 @@
-# 📊 Calendário Financeiro
+# 📅 Calendário Financeiro
 
-Sistema completo para gerenciamento de contas a pagar e pagas por empresa, com autenticação de usuários e armazenamento em nuvem.
+Sistema de gerenciamento de calendário financeiro para análise de contas a pagar e pagas por empresa.
 
-## ✨ Funcionalidades
+## 🚀 Funcionalidades
 
-### 🔐 Autenticação e Segurança
-- Sistema de login e registro de usuários
-- Confirmação por email
-- Dados isolados por usuário
-- Integração com Supabase Auth
+### 📊 Principais Recursos
+- **Upload de Arquivos Excel**: Suporte a arquivos de contas a pagar e contas pagas
+- **Calendário Interativo**: Visualização mensal com valores diários clicáveis
+- **Análise por Empresa**: Filtros e relatórios detalhados por empresa
+- **Formatação Brasileira**: Datas (dd/mm/yyyy) e valores (R$ 1.234,56) no padrão nacional
+- **Dashboard Completo**: Métricas principais e gráficos de análise
 
-### � Calendário Visual
-- Visualização mensal dos dados financeiros
-- Cores diferenciadas por tipo de transação
-- Navegação entre meses e anos
-- Regras de negócio automáticas (fins de semana → segunda-feira)
+### 🗑️ Limpeza de Dados
+- **Limpeza Seletiva**: Remove apenas contas a pagar ou contas pagas
+- **Limpeza Total**: Remove todos os dados do usuário
+- **Confirmação Visual**: Mostra quantidade de registros removidos
 
-### �📁 Processamento de Arquivos
-- Upload de arquivos Excel (.xls, .xlsx)
-- Conversão automática de formatos antigos
-- Validação e limpeza de dados
-- Detecção automática de estrutura
+### 🔄 Verificação de Duplicatas
+- **Detecção Automática**: Identifica registros duplicados antes da importação
+- **Controle Configurável**: Opção para ativar/desativar verificação
+- **Relatório Detalhado**: Mostra quantos registros foram ignorados por serem duplicatas
 
-### 📈 Análise Financeira
-- Comparação automática entre contas a pagar e pagas
-- Identificação de correspondências
-- Relatórios detalhados por empresa
-- Dashboard com métricas em tempo real
+### 📅 Calendário Interativo
+- **Dias Clicáveis**: Clique em qualquer dia para ver detalhes
+- **Tabelas Detalhadas**: Visualização completa de fornecedores e valores
+- **Totais Automáticos**: Soma de valores por dia automaticamente
+- **Navegação Intuitiva**: Fácil navegação entre meses e anos
 
-### 💾 Banco de Dados
-- Armazenamento em PostgreSQL (Supabase)
-- Sincronização em tempo real
-- Backup automático na nuvem
-- Histórico completo de processamentos
-
-## 🚀 Como Executar
+## 🛠️ Instalação
 
 ### Pré-requisitos
 - Python 3.8+
-- Conta no Supabase
+- Conta no Supabase (banco de dados)
 
 ### Configuração
-
-1. **Clone o repositório:**
+1. Clone o repositório:
 ```bash
-git clone <url-do-repositorio>
+git clone https://github.com/hoppemairon/calendario_financeiro.git
 cd calendario_financeiro
 ```
 
-2. **Instale as dependências:**
+2. Instale as dependências:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. **Configure o Supabase:**
-   - Crie um projeto no [Supabase](https://supabase.com)
-   - Execute o script SQL do banco (arquivo `fix_rls.sql`)
-   - Copie `.env.example` para `.env` e configure suas credenciais
+3. Configure as variáveis de ambiente:
+Crie um arquivo `.env` na raiz do projeto:
+```env
+SUPABASE_URL=sua_url_do_supabase
+SUPABASE_KEY=sua_chave_do_supabase
+```
 
-4. **Execute a aplicação:**
+4. Execute o aplicativo:
 ```bash
 streamlit run main_with_auth.py
 ```
 
-## 🛠️ Tecnologias
+## 📋 Como Usar
 
-- **Backend:** Python, Pandas, Supabase
-- **Frontend:** Streamlit, Plotly
-- **Banco:** PostgreSQL (Supabase)
-- **Autenticação:** Supabase Auth
-- **Deploy:** Streamlit Cloud (preparado)
+### 1. Upload de Arquivos
+- **Contas a Pagar**: Faça upload dos arquivos Excel na seção correspondente
+- **Contas Pagas**: Faça upload dos arquivos Excel de contas já pagas
+- **Verificação**: Ative/desative a verificação de duplicatas conforme necessário
 
-## 📋 Estrutura do Projeto
+### 2. Limpeza de Dados
+⚠️ **Atenção**: Operações de limpeza são irreversíveis!
+
+- **Limpar Contas a Pagar**: Remove apenas registros de contas a pagar
+- **Limpar Contas Pagas**: Remove apenas registros de contas pagas  
+- **Limpar Todos os Dados**: Remove TODOS os dados do usuário
+
+### 3. Visualização
+- **Calendário**: Visualize valores por dia, clique para ver detalhes
+- **Dados Atuais**: Tabelas completas com filtros por empresa
+- **Por Empresa**: Análise específica por empresa
+- **Exportar**: Gere relatórios em Excel
+
+## 🔧 Estrutura do Projeto
 
 ```
 calendario_financeiro/
+├── main_with_auth.py           # Aplicação principal
 ├── src/
-│   ├── auth/           # Sistema de autenticação
-│   ├── database/       # Cliente Supabase
-│   ├── calendar_app.py # Interface principal
-│   ├── data_processor.py # Processamento de dados
-│   └── payment_analyzer.py # Análise de pagamentos
-├── templates/          # Modelos de arquivos
-├── data/              # Dados processados (local)
-├── reports/           # Relatórios gerados
-├── main_with_auth.py  # Aplicação principal com auth
-└── main.py           # Versão sem autenticação (legacy)
+│   ├── auth/
+│   │   └── auth_manager.py     # Gerenciamento de autenticação
+│   ├── database/
+│   │   ├── models.py           # Modelos de dados
+│   │   └── supabase_client.py  # Cliente do banco de dados
+│   ├── client_file_converter.py # Conversão de arquivos
+│   ├── data_processor.py       # Processamento de dados
+│   ├── payment_analyzer.py     # Análise de pagamentos
+│   ├── report_generator.py     # Geração de relatórios
+│   └── utils.py               # Utilitários e formatação brasileira
+├── data/                      # Dados processados
+├── reports/                   # Relatórios gerados
+├── templates/                 # Modelos de arquivos
+└── ArquivosModeloCliente/     # Arquivos de exemplo
 ```
 
-## 🔧 Configuração do Banco
+## 🎯 Formatação Brasileira
 
-Execute o arquivo `fix_rls.sql` no seu projeto Supabase para criar o schema completo.
+O sistema utiliza formatação nacional em todos os aspectos:
+- **Moeda**: R$ 1.234,56 (separador de milhares: ponto, decimais: vírgula)
+- **Data**: 15/08/2025 (dia/mês/ano)
+- **Meses**: Janeiro, Fevereiro, Março... (nomes em português)
+- **Interface**: Textos e mensagens em português brasileiro
 
-## 📄 Formato dos Arquivos
+## 🔒 Verificação de Duplicatas
 
-### Contas a Pagar:
-- Empresa, Valor, Data de Vencimento, Descrição, Categoria
+### Como Funciona
+O sistema verifica duplicatas baseado em:
+- **Empresa**: Nome da empresa (exato)
+- **Valor**: Valor da conta (exato)
+- **Data**: Data de vencimento/pagamento (exata)
+- **Descrição**: Descrição da conta (exata)
 
-### Contas Pagas:
-- Empresa, Valor, Data de Pagamento, Descrição, Categoria
+### Configuração
+- **Ativada por padrão**: A verificação vem habilitada
+- **Configurável**: Pode ser desativada na seção "Configurações"
+- **Relatório**: Mostra quantas duplicatas foram encontradas e ignoradas
 
-## 📄 Licença
+## 📊 Métricas do Dashboard
 
-Este projeto está licenciado sob a MIT License.
+O dashboard apresenta:
+- **Total a Pagar**: Soma de todas as contas pendentes
+- **Total Pago**: Soma de todas as contas quitadas
+- **Saldo**: Diferença entre a pagar e pago
+- **% Pago**: Percentual de contas quitadas
+- **Empresas**: Número total de empresas cadastradas
 
-## 👨‍💻 Autor
+## 🚨 Avisos Importantes
 
-Mairon Hoppe - [hoppe.mairon@gmail.com](mailto:hoppe.mairon@gmail.com)
+1. **Limpeza de Dados**: Operações são irreversíveis
+2. **Backup**: Sempre faça backup antes de limpar dados
+3. **Duplicatas**: Configure adequadamente para evitar dados desnecessários
+4. **Formato**: Use arquivos Excel no formato esperado pelo sistema
+
+## 🤝 Contribuição
+
+1. Fork o projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
+
+## 📝 Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalhes.
+
+## 📞 Suporte
+
+Para suporte, abra uma issue no repositório ou entre em contato através do email de suporte.
+
+---
+
+**Desenvolvido com ❤️ para otimizar o controle financeiro empresarial**
