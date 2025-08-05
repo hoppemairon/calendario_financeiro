@@ -538,7 +538,7 @@ def processar_arquivo_padrao(uploaded_file, processor):
 
 def criar_calendario_financeiro(df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame, mes: int = None, ano: int = None):
     """
-    Cria um calendário visual com informações financeiras em visualização semanal.
+    Cria um calendário visual com informações financeiras com opção de visualização mensal ou semanal.
     
     Args:
         df_a_pagar: DataFrame com contas a pagar
@@ -569,8 +569,17 @@ def criar_calendario_financeiro(df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame
     # Criar título e seletores
     st.subheader(f"📅 Calendário Financeiro - {nome_mes} {ano}")
     
-    # Seletor de mês/ano
-    col_mes, col_ano = st.columns(2)
+    # Seletor de modo de visualização, mês e ano
+    col_modo, col_mes, col_ano = st.columns(3)
+    
+    with col_modo:
+        modo_visualizacao = st.selectbox(
+            "🔍 Modo de Visualização",
+            ["📅 Semanal", "🗓️ Mensal"],
+            key="modo_calendario",
+            help="Escolha como deseja visualizar o calendário"
+        )
+    
     with col_mes:
         meses_brasileiros = [
             "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -588,32 +597,39 @@ def criar_calendario_financeiro(df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame
         ano = novo_ano
         nome_mes = obter_mes_nome_brasileiro(mes)
     
-    # Calcular semanas do mês
-    semanas = calcular_semanas_do_mes(ano, mes)
-    
-    # Seletor de semana
-    st.markdown("---")
-    st.markdown("### 📅 Selecione a Semana")
-    
-    opcoes_semanas = []
-    for i, semana in enumerate(semanas):
-        inicio = semana['inicio'].strftime('%d/%m')
-        fim = semana['fim'].strftime('%d/%m')
-        opcoes_semanas.append(f"Semana {i+1}: {inicio} - {fim}")
-    
-    semana_selecionada_idx = st.selectbox(
-        "Semana",
-        range(len(opcoes_semanas)),
-        format_func=lambda x: opcoes_semanas[x],
-        key="semana_selecionada"
-    )
-    
-    semana_selecionada = semanas[semana_selecionada_idx]
-    
-    # Mostrar calendário semanal
-    mostrar_calendario_semanal(
-        semana_selecionada, df_a_pagar, df_pagas, mes, ano
-    )
+    # Mostrar calendário baseado no modo selecionado
+    if modo_visualizacao == "📅 Semanal":
+        # Calcular semanas do mês
+        semanas = calcular_semanas_do_mes(ano, mes)
+        
+        # Seletor de semana
+        st.markdown("---")
+        st.markdown("### 📅 Selecione a Semana")
+        
+        opcoes_semanas = []
+        for i, semana in enumerate(semanas):
+            inicio = semana['inicio'].strftime('%d/%m')
+            fim = semana['fim'].strftime('%d/%m')
+            opcoes_semanas.append(f"Semana {i+1}: {inicio} - {fim}")
+        
+        semana_selecionada_idx = st.selectbox(
+            "Semana",
+            range(len(opcoes_semanas)),
+            format_func=lambda x: opcoes_semanas[x],
+            key="semana_selecionada"
+        )
+        
+        semana_selecionada = semanas[semana_selecionada_idx]
+        
+        # Mostrar calendário semanal
+        mostrar_calendario_semanal(
+            semana_selecionada, df_a_pagar, df_pagas, mes, ano
+        )
+        
+    else:  # Modo Mensal
+        st.markdown("---")
+        st.markdown("### 🗓️ Visualização Mensal")
+        mostrar_calendario_mensal(df_a_pagar, df_pagas, mes, ano)
     
     # Mostrar detalhes do dia selecionado
     if 'dia_selecionado' in st.session_state:
@@ -1576,7 +1592,7 @@ def mostrar_calendario_semanal(semana_info, df_a_pagar, df_pagas, mes, ano):
                 <div style="
                     padding: 20px; 
                     margin: 4px 0;
-                    min-height: 180px;
+                    min-height: 235px;
                     background: #f8fafc;
                     border: 2px dashed #cbd5e1;
                     border-radius: 12px;
@@ -1593,6 +1609,347 @@ def mostrar_calendario_semanal(semana_info, df_a_pagar, df_pagas, mes, ano):
     
     # Resumo da semana
     mostrar_resumo_semana(dados_semana, semana_info)
+
+def mostrar_calendario_mensal(df_a_pagar, df_pagas, mes, ano):
+    """
+    Mostra o calendário mensal completo com informações financeiras compactas.
+    """
+    # Importar calendar
+    import calendar
+    
+    # CSS para calendário mensal - ainda mais compacto
+    st.markdown("""
+    <style>
+    /* Estilos específicos para calendário mensal */
+    .calendario-mensal {
+        font-size: 0.7rem !important;
+    }
+    .calendario-mensal div[data-testid="stButton"] > button {
+        font-size: 0.45rem !important;
+        padding: 2px 4px !important;
+        height: auto !important;
+        min-height: 20px !important;
+        max-height: 24px !important;
+        line-height: 1.1 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Calcular dados do mês inteiro
+    dados_mes = calcular_dados_mes_completo(df_a_pagar, df_pagas, mes, ano)
+    
+    # Configurar calendário para começar no domingo
+    calendar.setfirstweekday(calendar.SUNDAY)
+    cal = calendar.monthcalendar(ano, mes)
+    
+    # Mostrar legenda
+    st.markdown("#### 📋 Legenda:")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown("🔴 **A Pagar** - Valores pendentes")
+    with col2:
+        st.markdown("🟢 **Pago** - Valores pagos") 
+    with col3:
+        st.markdown("🔵 **Diferença** - Pago - A Pagar")
+    with col4:
+        st.markdown("📅 **Hoje** - Dia atual (destaque azul)")
+    
+    st.info("💡 **Regra de Negócio**: Valores de sábados e domingos são automaticamente transferidos para a próxima segunda-feira.")
+    
+    # Cabeçalho dos dias da semana
+    dias_semana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+    cols_header = st.columns(7)
+    for i, dia_nome in enumerate(dias_semana):
+        with cols_header[i]:
+            st.markdown(f"""
+            <div style="
+                text-align: center; 
+                font-weight: bold; 
+                padding: 8px 4px; 
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border-radius: 6px; 
+                margin-bottom: 4px;
+                font-size: 12px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            ">
+                {dia_nome}
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Mostrar semanas do mês
+    for semana in cal:
+        cols_semana = st.columns(7)
+        
+        for dia_semana_idx, dia in enumerate(semana):
+            with cols_semana[dia_semana_idx]:
+                if dia == 0:
+                    # Dia vazio (não pertence ao mês)
+                    st.markdown("""
+                    <div style="
+                        padding: 20px; 
+                        margin: 20px 0;
+                        min-height: 150px;
+                        background: #f8fafc;
+                        border: 1px dashed #e2e8f0;
+                        border-radius: 6px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: #cbd5e1;
+                        font-style: italic;
+                        font-size: 15px;
+                    ">
+                        -
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    # Dia válido - usar função compacta
+                    with st.container():
+                        st.markdown('<div class="calendario-mensal">', unsafe_allow_html=True)
+                        mostrar_dia_mensal(dia, dados_mes.get(dia, {}), mes, ano)
+                        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Resumo do mês
+    st.markdown("---")
+    st.markdown("### 📊 Resumo do Mês")
+    mostrar_resumo_mes(dados_mes)
+
+def calcular_dados_mes_completo(df_a_pagar, df_pagas, mes, ano):
+    """
+    Calcula os dados financeiros para todos os dias do mês.
+    """
+    import calendar
+    
+    # Obter número de dias no mês
+    _, dias_no_mes = calendar.monthrange(ano, mes)
+    
+    dados_mes = {}
+    
+    # Inicializar todos os dias do mês
+    for dia in range(1, dias_no_mes + 1):
+        dados_mes[dia] = {
+            'a_pagar': 0,
+            'pagas': 0,
+            'qtd_a_pagar': 0,
+            'qtd_pagas': 0,
+            'contas_a_pagar': [],
+            'contas_pagas': []
+        }
+    
+    # Processar contas a pagar
+    if not df_a_pagar.empty:
+        for _, row in df_a_pagar.iterrows():
+            data_original = pd.to_datetime(row['data_vencimento'], errors='coerce')
+            if pd.notna(data_original):
+                data_ajustada = ajustar_para_dia_util(data_original)
+                
+                # Verificar se a data ajustada está no mês/ano atual
+                if data_ajustada.month == mes and data_ajustada.year == ano:
+                    dia = data_ajustada.day
+                    valor = float(row['valor'])
+                    
+                    dados_mes[dia]['a_pagar'] += valor
+                    dados_mes[dia]['qtd_a_pagar'] += 1
+                    dados_mes[dia]['contas_a_pagar'].append({
+                        'empresa': row['empresa'],
+                        'fornecedor': row.get('fornecedor', 'N/A'),
+                        'valor': valor,
+                        'descricao': row['descricao'],
+                        'data_original': data_original.strftime('%d/%m/%Y'),
+                        'transferida': data_original.date() != data_ajustada.date()
+                    })
+
+    # Processar contas pagas
+    if not df_pagas.empty:
+        for _, row in df_pagas.iterrows():
+            data_original = pd.to_datetime(row['data_pagamento'], errors='coerce')
+            if pd.notna(data_original):
+                data_ajustada = ajustar_para_dia_util(data_original)
+                
+                # Verificar se a data ajustada está no mês/ano atual
+                if data_ajustada.month == mes and data_ajustada.year == ano:
+                    dia = data_ajustada.day
+                    valor = float(row['valor'])
+                    
+                    dados_mes[dia]['pagas'] += valor
+                    dados_mes[dia]['qtd_pagas'] += 1
+                    dados_mes[dia]['contas_pagas'].append({
+                        'empresa': row['empresa'],
+                        'fornecedor': row.get('fornecedor', 'N/A'),
+                        'valor': valor,
+                        'descricao': row['descricao'],
+                        'data_original': data_original.strftime('%d/%m/%Y'),
+                        'transferida': data_original.date() != data_ajustada.date()
+                    })
+    
+    return dados_mes
+
+def mostrar_dia_mensal(dia, dados_dia, mes, ano):
+    """
+    Mostra um dia específico na visualização mensal - versão ultra compacta.
+    """
+    from datetime import datetime
+    
+    hoje = datetime.now()
+    
+    # Verificar se é hoje
+    eh_hoje = dia == hoje.day and mes == hoje.month and ano == hoje.year
+    
+    # Calcular diferença
+    diferenca = dados_dia.get('pagas', 0) - dados_dia.get('a_pagar', 0)
+    
+    if dados_dia.get('a_pagar', 0) > 0 or dados_dia.get('pagas', 0) > 0:
+        # Dia com movimentação - versão ultra compacta
+        with st.container():
+            # Número do dia
+            if eh_hoje:
+                st.markdown(f"<div style='text-align: center; font-weight: bold; margin-bottom: 4px; color: #2563eb;'>📅 {dia}</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div style='text-align: center; font-weight: bold; margin-bottom: 4px;'>{dia}</div>", unsafe_allow_html=True)
+            
+            # Valores ultra compactos
+            a_pagar_valor = formatar_moeda_brasileira(dados_dia.get('a_pagar', 0), com_simbolo=False)
+            pago_valor = formatar_moeda_brasileira(dados_dia.get('pagas', 0), com_simbolo=False)
+            diferenca_valor = formatar_moeda_brasileira(diferenca, com_simbolo=False)
+            
+            # A Pagar
+            st.markdown(f"""
+            <div style="margin: 1px 0; padding: 2px; border-radius: 3px; background: #fff5f5;">
+                <div style="font-size: 0.8rem; color: #dc2626;">🔴 {a_pagar_valor}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Pago
+            st.markdown(f"""
+            <div style="margin: 1px 0; padding: 2px; border-radius: 3px; background: #f0fdf4;">
+                <div style="font-size: 0.8rem; color: #16a34a;">🟢 {pago_valor}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Diferença
+            cor_diferenca = "#16a34a" if diferenca > 0 else "#dc2626" if diferenca < 0 else "#6b7280"
+            cor_fundo_diferenca = "#f0fdf4" if diferenca > 0 else "#fff5f5" if diferenca < 0 else "#f8fafc"
+            icone_diferenca = "🔺" if diferenca > 0 else "🔻" if diferenca < 0 else "➖"
+            
+            st.markdown(f"""
+            <div style="margin: 1px 0; padding: 2px; border-radius: 3px; background: {cor_fundo_diferenca};">
+                <div style="font-size: 0.8rem; color: {cor_diferenca};">{icone_diferenca} {diferenca_valor}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Botão compacto para ver detalhes
+        if st.button(
+            f"📋 {dia}",
+            key=f"dia_mensal_{dia}_{mes}_{ano}",
+            help=f"Ver detalhes do dia {dia:02d}/{mes:02d}/{ano}",
+            use_container_width=True
+        ):
+            st.session_state['dia_selecionado'] = {
+                'dia': dia,
+                'mes': mes,
+                'ano': ano
+            }
+            st.rerun()
+            
+    else:
+        # Dia sem movimentação - ultra compacto
+        cor_fundo = "#dbeafe" if eh_hoje else "#f8fafc"
+        icone_dia = "📅" if eh_hoje else ""
+        
+        st.markdown(f"""
+        <div style="
+            background: {cor_fundo};
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 4px;
+            margin: 2px 0;
+            min-height: 80px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        ">
+            <div style="font-size: 14px; font-weight: bold; color: #6b7280; margin-bottom: 4px;">
+                {icone_dia} {dia}
+            </div>
+            <div style="
+                font-size: 0.45rem; 
+                color: #9ca3af; 
+                font-style: italic; 
+                min-height: 116px; 
+                text-align: center;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+            ">
+                Sem movimento
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+def mostrar_resumo_mes(dados_mes):
+    """
+    Mostra o resumo financeiro do mês completo.
+    """
+    # Calcular totais do mês
+    total_a_pagar = sum(dados_dia.get('a_pagar', 0) for dados_dia in dados_mes.values())
+    total_pagas = sum(dados_dia.get('pagas', 0) for dados_dia in dados_mes.values())
+    total_contas_a_pagar = sum(dados_dia.get('qtd_a_pagar', 0) for dados_dia in dados_mes.values())
+    total_contas_pagas = sum(dados_dia.get('qtd_pagas', 0) for dados_dia in dados_mes.values())
+    diferenca_mes = total_pagas - total_a_pagar
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Usar HTML personalizado para controle total do tamanho
+    with col1:
+        valor_a_pagar = formatar_moeda_brasileira(total_a_pagar)
+        st.markdown(f"""
+        <div style="padding: 12px; border-radius: 8px; background: #fff5f5; border: 2px solid #fecaca;">
+            <div style="font-size: 0.65rem; font-weight: normal; color: #dc2626; margin-bottom: 4px;">💸 Total a Pagar</div>
+            <div style="font-size: 0.9rem; font-weight: bold; color: #dc2626; margin-bottom: 4px;">{valor_a_pagar}</div>
+            <div style="font-size: 0.6rem; color: #9ca3af;">{total_contas_a_pagar} contas</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        valor_pago = formatar_moeda_brasileira(total_pagas)
+        st.markdown(f"""
+        <div style="padding: 12px; border-radius: 8px; background: #f0fdf4; border: 2px solid #bbf7d0;">
+            <div style="font-size: 0.65rem; font-weight: normal; color: #16a34a; margin-bottom: 4px;">✅ Total Pago</div>
+            <div style="font-size: 0.9rem; font-weight: bold; color: #16a34a; margin-bottom: 4px;">{valor_pago}</div>
+            <div style="font-size: 0.6rem; color: #9ca3af;">{total_contas_pagas} contas</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        valor_diferenca = formatar_moeda_brasileira(diferenca_mes)
+        cor_fundo = "#f0fdf4" if diferenca_mes >= 0 else "#fff5f5"
+        cor_borda = "#bbf7d0" if diferenca_mes >= 0 else "#fecaca"
+        cor_texto = "#16a34a" if diferenca_mes >= 0 else "#dc2626"
+        status_texto = "✅ Positivo" if diferenca_mes >= 0 else "❌ Negativo"
+        
+        st.markdown(f"""
+        <div style="padding: 12px; border-radius: 8px; background: {cor_fundo}; border: 2px solid {cor_borda};">
+            <div style="font-size: 0.65rem; font-weight: normal; color: {cor_texto}; margin-bottom: 4px;">📊 Saldo do Mês</div>
+            <div style="font-size: 0.9rem; font-weight: bold; color: {cor_texto}; margin-bottom: 4px;">{valor_diferenca}</div>
+            <div style="font-size: 0.6rem; color: #9ca3af;">{status_texto}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        dias_com_movimento = len([d for d in dados_mes.values() if d.get('a_pagar', 0) > 0 or d.get('pagas', 0) > 0])
+        percentual = round(dias_com_movimento/len(dados_mes)*100)
+        
+        st.markdown(f"""
+        <div style="padding: 12px; border-radius: 8px; background: #f1f5f9; border: 2px solid #cbd5e1;">
+            <div style="font-size: 0.65rem; font-weight: normal; color: #475569; margin-bottom: 4px;">📅 Dias com Movimento</div>
+            <div style="font-size: 0.9rem; font-weight: bold; color: #475569; margin-bottom: 4px;">{dias_com_movimento}/{len(dados_mes)}</div>
+            <div style="font-size: 0.6rem; color: #9ca3af;">{percentual}% do mês</div>
+        </div>
+        """, unsafe_allow_html=True)
 
 def calcular_dados_semana(semana_info, df_a_pagar, df_pagas, mes, ano):
     """
@@ -1798,6 +2155,7 @@ def mostrar_dia_semana(dia, dados_dia, mes, ano):
                 align-items: center;
                 justify-content: center;
                 gap: 4px;
+                min-height: 108px;
             ">
                 {icone_dia} {dia}
             </div>
@@ -1850,7 +2208,7 @@ def mostrar_resumo_semana(dados_semana, semana_info):
         st.markdown(f"""
         <div style="padding: 8px; border-radius: 6px; background: #fff5f5; border: 1px solid #fecaca;">
             <div style="font-size: 0.55rem; font-weight: normal; color: #dc2626; margin-bottom: 2px;">💸 Total a Pagar</div>
-            <div style="font-size: 0.75rem; font-weight: bold; color: #dc2626; margin-bottom: 2px;">{valor_a_pagar}</div>
+            <div style="font-size: 0.95rem; font-weight: bold; color: #dc2626; margin-bottom: 2px;">{valor_a_pagar}</div>
             <div style="font-size: 0.5rem; color: #9ca3af;">{total_contas_a_pagar} contas</div>
         </div>
         """, unsafe_allow_html=True)
@@ -1860,7 +2218,7 @@ def mostrar_resumo_semana(dados_semana, semana_info):
         st.markdown(f"""
         <div style="padding: 8px; border-radius: 6px; background: #f0fdf4; border: 1px solid #bbf7d0;">
             <div style="font-size: 0.55rem; font-weight: normal; color: #16a34a; margin-bottom: 2px;">✅ Total Pago</div>
-            <div style="font-size: 0.75rem; font-weight: bold; color: #16a34a; margin-bottom: 2px;">{valor_pago}</div>
+            <div style="font-size: 0.95rem; font-weight: bold; color: #16a34a; margin-bottom: 2px;">{valor_pago}</div>
             <div style="font-size: 0.5rem; color: #9ca3af;">{total_contas_pagas} contas</div>
         </div>
         """, unsafe_allow_html=True)
@@ -1875,7 +2233,7 @@ def mostrar_resumo_semana(dados_semana, semana_info):
         st.markdown(f"""
         <div style="padding: 8px; border-radius: 6px; background: {cor_fundo}; border: 1px solid {cor_borda};">
             <div style="font-size: 0.55rem; font-weight: normal; color: {cor_texto}; margin-bottom: 2px;">📊 Saldo da Semana</div>
-            <div style="font-size: 0.75rem; font-weight: bold; color: {cor_texto}; margin-bottom: 2px;">{valor_diferenca}</div>
+            <div style="font-size: 0.95rem; font-weight: bold; color: {cor_texto}; margin-bottom: 2px;">{valor_diferenca}</div>
             <div style="font-size: 0.5rem; color: #9ca3af;">{status_texto}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -1887,7 +2245,7 @@ def mostrar_resumo_semana(dados_semana, semana_info):
         st.markdown(f"""
         <div style="padding: 8px; border-radius: 6px; background: #f1f5f9; border: 1px solid #cbd5e1;">
             <div style="font-size: 0.55rem; font-weight: normal; color: #475569; margin-bottom: 2px;">📅 Dias com Movimento</div>
-            <div style="font-size: 0.75rem; font-weight: bold; color: #475569; margin-bottom: 2px;">{dias_com_movimento}/{len(semana_info['dias'])}</div>
+            <div style="font-size: 0.95rem; font-weight: bold; color: #475569; margin-bottom: 2px;">{dias_com_movimento}/{len(semana_info['dias'])}</div>
             <div style="font-size: 0.5rem; color: #9ca3af;">{percentual}% da semana</div>
         </div>
         """, unsafe_allow_html=True)
