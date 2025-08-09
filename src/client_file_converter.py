@@ -9,6 +9,9 @@ from typing import Optional, List, Dict
 import logging
 import os
 
+# Importar o novo conversor de contas pagas
+from .modelo_contas_pagas_converter import ModeloContasPagasConverter
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,6 +19,9 @@ class ClientFileConverter:
     """Conversor para arquivos no formato específico do cliente."""
     
     def __init__(self):
+        # Inicializar o conversor de contas pagas
+        self.conversor_contas_pagas = ModeloContasPagasConverter()
+        
         self.colunas_mapeamento = {
             'EmpresaNome': 'empresa_origem',
             'Campo39': 'data_vencimento', 
@@ -397,5 +403,96 @@ class ClientFileConverter:
         except Exception as e:
             resultado['erro'] = str(e)
             logger.error(f"Erro no processamento completo: {str(e)}")
+        
+        return resultado
+    
+    # === MÉTODOS PARA CONTAS PAGAS ===
+    
+    def detectar_formato_modelo_contas_pagas(self, arquivo_path: str) -> bool:
+        """
+        Detecta se o arquivo é do formato Modelo_Contas_Pagas.
+        
+        Args:
+            arquivo_path: Caminho para o arquivo
+            
+        Returns:
+            bool: True se for formato Modelo_Contas_Pagas
+        """
+        return self.conversor_contas_pagas.detectar_formato_modelo_contas_pagas(arquivo_path)
+    
+    def converter_modelo_contas_pagas(self, arquivo_path: str) -> Optional[pd.DataFrame]:
+        """
+        Converte arquivo Modelo_Contas_Pagas.xlsx para o formato do banco.
+        
+        Args:
+            arquivo_path: Caminho para o arquivo
+            
+        Returns:
+            DataFrame convertido ou None se houver erro
+        """
+        return self.conversor_contas_pagas.converter_modelo_contas_pagas(arquivo_path)
+    
+    def processar_contas_pagas_completo(self, arquivo_path: str, salvar_convertido: bool = True) -> Dict[str, any]:
+        """
+        Processa arquivo completo de contas pagas com detalhes.
+        
+        Args:
+            arquivo_path: Caminho para o arquivo
+            salvar_convertido: Se deve salvar arquivo convertido
+            
+        Returns:
+            Dict com resultado do processamento
+        """
+        resultado = {
+            'sucesso': False,
+            'dados_convertidos': pd.DataFrame(),
+            'arquivo_convertido': None,
+            'relatorio': {},
+            'erro': None
+        }
+        
+        try:
+            logger.info(f"Iniciando processamento de contas pagas: {arquivo_path}")
+            
+            # Detectar e converter
+            if self.detectar_formato_modelo_contas_pagas(arquivo_path):
+                df_convertido = self.converter_modelo_contas_pagas(arquivo_path)
+                
+                if df_convertido is not None and not df_convertido.empty:
+                    resultado['dados_convertidos'] = df_convertido
+                    
+                    # Salvar arquivo convertido se solicitado
+                    if salvar_convertido:
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        nome_base = os.path.splitext(os.path.basename(arquivo_path))[0]
+                        arquivo_convertido = f"data/contas_pagas/{nome_base}_convertido_{timestamp}.xlsx"
+                        
+                        # Criar diretório se não existir
+                        os.makedirs(os.path.dirname(arquivo_convertido), exist_ok=True)
+                        
+                        df_convertido.to_excel(arquivo_convertido, index=False)
+                        resultado['arquivo_convertido'] = arquivo_convertido
+                        logger.info(f"Arquivo convertido salvo: {arquivo_convertido}")
+                    
+                    # Gerar relatório
+                    df_original = pd.read_excel(arquivo_path)
+                    resultado['relatorio'] = {
+                        'registros_original': len(df_original),
+                        'registros_convertidos': len(df_convertido),
+                        'colunas_original': list(df_original.columns),
+                        'colunas_convertidas': list(df_convertido.columns),
+                        'tipo_conversao': 'Modelo_Contas_Pagas'
+                    }
+                    
+                    resultado['sucesso'] = True
+                    logger.info(f"Processamento de contas pagas concluído: {arquivo_path}")
+                else:
+                    resultado['erro'] = "Nenhum dado foi convertido"
+            else:
+                resultado['erro'] = "Formato não reconhecido como Modelo_Contas_Pagas"
+                
+        except Exception as e:
+            resultado['erro'] = str(e)
+            logger.error(f"Erro no processamento de contas pagas: {str(e)}")
         
         return resultado

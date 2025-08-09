@@ -114,9 +114,6 @@ from src.payment_analyzer import PaymentAnalyzer
 from src.report_generator import ReportGenerator
 from src.client_file_converter import ClientFileConverter
 
-# Importar interface de compartilhamento
-from src.compartilhamento_ui import mostrar_compartilhamento_compacto, mostrar_interface_compartilhamento
-
 # Importar interface de validação de contas pagas
 from src.contas_pagas_interface import mostrar_interface_validacao_contas_pagas
 
@@ -243,15 +240,15 @@ def carregar_aplicacao_principal():
         key="a_pagar",
         help="O sistema detectará automaticamente o formato dos arquivos"
     )
-    
-    # Upload de arquivos de contas pagas
-    st.sidebar.subheader("Contas Pagas")
-    uploaded_pagas = st.sidebar.file_uploader(
-        "Selecione arquivos de contas pagas",
-        type=['xlsx', 'xls'],
-        accept_multiple_files=True,
-        key="pagas"
-    )
+
+    ## Upload de arquivos de contas pagas
+    #st.sidebar.subheader("Contas Pagas")
+    #uploaded_pagas = st.sidebar.file_uploader(
+    #    "Selecione arquivos de contas pagas",
+    #    type=['xlsx', 'xls'],
+    #    accept_multiple_files=True,
+    #    key="pagas"
+    #)
     
     # Botão para processar
     processar = st.sidebar.button("🔄 Processar e Salvar no Banco", type="primary")
@@ -302,15 +299,12 @@ def carregar_aplicacao_principal():
     # Armazenar configuração no session state
     st.session_state['verificar_duplicatas'] = verificar_duplicatas
     
-    # Adicionar compartilhamento compacto na sidebar
-    mostrar_compartilhamento_compacto(supabase_client)
-    
-    # Processamento dos arquivos
-    if processar and (uploaded_a_pagar or uploaded_pagas):
-        processar_arquivos(
-            uploaded_a_pagar, uploaded_pagas, 
-            supabase_client, converter, processor
-        )
+    ## Processamento dos arquivos
+    #if processar and (uploaded_a_pagar or uploaded_pagas):
+    #    processar_arquivos(
+    #        uploaded_a_pagar, uploaded_pagas, 
+    #        supabase_client, converter, processor
+    #    )
     
     # Mostrar dados do banco
     mostrar_dados_banco(supabase_client, analyzer, report_gen)
@@ -700,8 +694,7 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
                 data_ajustada = ajustar_para_dia_util(data_pagamento)
                 if data_ajustada.date() == data_filtro:
                     conta_info = {
-                        'empresa': row['empresa'],
-                        'fornecedor': row.get('fornecedor', 'N/A'),
+                        'conta_corrente': row.get('conta_corrente', 'N/A'),
                         'valor': row['valor'],
                         'descricao': row['descricao'],
                         'categoria': row.get('categoria', 'N/A'),
@@ -748,8 +741,7 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
             
             # Renomear colunas
             df_display = df_display.rename(columns={
-                'empresa': 'Empresa',
-                'fornecedor': 'Fornecedor',
+                'conta_corrente': 'Conta Corrente',
                 'valor': 'Valor',
                 'descricao': 'Descrição',
                 'categoria': 'Categoria',
@@ -787,10 +779,10 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
             
         st.metric("Saldo do Dia", formatar_moeda_brasileira(diferenca), status_text)
     
-    # Relatório de Fornecedores
-    st.markdown("### 🏢 Relatório por Fornecedor")
+    # Relatório de Fornecedores/Contas Correntes
+    st.markdown("### 🏢 Relatório por Fornecedor/Conta Corrente")
     
-    # Consolidar dados por fornecedor
+    # Consolidar dados por fornecedor/conta corrente
     relatorio_fornecedores = {}
     
     # Processar contas a pagar
@@ -798,7 +790,8 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
         fornecedor = conta['fornecedor']
         if fornecedor not in relatorio_fornecedores:
             relatorio_fornecedores[fornecedor] = {
-                'fornecedor': fornecedor,
+                'identificador': fornecedor,
+                'tipo': 'Fornecedor',
                 'total_a_pagar': 0,
                 'total_pago': 0,
                 'qtd_a_pagar': 0,
@@ -807,19 +800,20 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
         relatorio_fornecedores[fornecedor]['total_a_pagar'] += conta['valor']
         relatorio_fornecedores[fornecedor]['qtd_a_pagar'] += 1
     
-    # Processar contas pagas
+    # Processar contas pagas - usar conta_corrente como identificador
     for conta in contas_pagas_dia:
-        fornecedor = conta['fornecedor']
-        if fornecedor not in relatorio_fornecedores:
-            relatorio_fornecedores[fornecedor] = {
-                'fornecedor': fornecedor,
+        conta_corrente = conta['conta_corrente']
+        if conta_corrente not in relatorio_fornecedores:
+            relatorio_fornecedores[conta_corrente] = {
+                'identificador': conta_corrente,
+                'tipo': 'Conta Corrente',
                 'total_a_pagar': 0,
                 'total_pago': 0,
                 'qtd_a_pagar': 0,
                 'qtd_pagas': 0
             }
-        relatorio_fornecedores[fornecedor]['total_pago'] += conta['valor']
-        relatorio_fornecedores[fornecedor]['qtd_pagas'] += 1
+        relatorio_fornecedores[conta_corrente]['total_pago'] += conta['valor']
+        relatorio_fornecedores[conta_corrente]['qtd_pagas'] += 1
     
     if relatorio_fornecedores:
         # Converter para DataFrame
@@ -1782,7 +1776,7 @@ def calcular_dados_mes_completo(df_a_pagar, df_pagas, mes, ano):
                     dados_mes[dia]['pagas'] += valor
                     dados_mes[dia]['qtd_pagas'] += 1
                     dados_mes[dia]['contas_pagas'].append({
-                        'empresa': row['empresa'],
+                        'conta_corrente': row.get('conta_corrente', 'N/A'),
                         'fornecedor': row.get('fornecedor', 'N/A'),
                         'valor': valor,
                         'descricao': row['descricao'],
@@ -2017,7 +2011,7 @@ def calcular_dados_semana(semana_info, df_a_pagar, df_pagas, mes, ano):
                     dados_semana[dia]['pagas'] += valor
                     dados_semana[dia]['qtd_pagas'] += 1
                     dados_semana[dia]['contas_pagas'].append({
-                        'empresa': row['empresa'],
+                        'conta_corrente': row.get('conta_corrente', 'N/A'),
                         'fornecedor': row.get('fornecedor', 'N/A'),
                         'valor': valor,
                         'descricao': row['descricao'],
@@ -2279,12 +2273,11 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
     """Mostra dados carregados do banco."""
     
     # Tabs para diferentes visões
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🗓️ Calendário", 
         "📊 Dados Atuais", 
         "🏢 Por Empresa", 
         "📋 Exportar", 
-        "🤝 Compartilhamento",
         "🔍 Validação Contas Pagas"
     ])
     
@@ -2350,7 +2343,10 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
                 df_pagas = supabase_client.buscar_contas_pagas()
             else:
                 df_a_pagar = supabase_client.buscar_contas_a_pagar(empresa=empresa_selecionada)
-                df_pagas = supabase_client.buscar_contas_pagas(empresa=empresa_selecionada)
+                df_pagas = supabase_client.buscar_contas_pagas()
+                # Filtrar pagas por conta_corrente se necessário (já que empresa não existe mais)
+                if not df_pagas.empty and 'conta_corrente' in df_pagas.columns:
+                    df_pagas = df_pagas[df_pagas['conta_corrente'].str.contains(empresa_selecionada, na=False, case=False)]
             
             if not df_a_pagar.empty or not df_pagas.empty:
                 # Usar analyzer para gerar correspondências
@@ -2407,10 +2403,6 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
                     st.error(f"Erro ao gerar relatório: {str(e)}")
     
     with tab5:
-        # Usar interface já importada
-        mostrar_interface_compartilhamento(supabase_client)
-    
-    with tab6:
         # Interface de validação de contas pagas
         mostrar_interface_validacao_contas_pagas(supabase_client)
 

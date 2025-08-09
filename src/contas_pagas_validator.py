@@ -100,38 +100,22 @@ class ContasPagasValidator:
             
             # Mapeamento direto das colunas
             if 'IdBanco' in df.columns:
-                df_convertido['empresa'] = df['IdBanco'].astype(str)
+                df_convertido['conta_corrente'] = df['IdBanco'].astype(str)
             
             if 'Datapagamento' in df.columns:
                 df_convertido['data_pagamento'] = pd.to_datetime(df['Datapagamento'], errors='coerce')
             
-            if 'DescriçãoConta' in df.columns:
-                df_convertido['descricao'] = df['DescriçãoConta'].astype(str)
-            
-            # Para fornecedor, vamos tentar extrair do histórico ou usar empresa
             if 'Histórico' in df.columns:
-                df_convertido['historico'] = df['Histórico'].astype(str)
-                # Tentar extrair fornecedor do histórico
-                df_convertido['fornecedor'] = df['Histórico'].astype(str)
-            else:
-                df_convertido['fornecedor'] = df_convertido['empresa'] if 'empresa' in df_convertido.columns else 'N/I'
+                df_convertido['descricao'] = df['Histórico'].astype(str)
             
+            if 'DescriçãoConta' in df.columns:
+                df_convertido['categoria'] = df['DescriçãoConta'].astype(str)
+
             # Valor - usar Saída (que são os pagamentos)
             if 'Saída' in df.columns:
                 df_convertido['valor'] = pd.to_numeric(df['Saída'], errors='coerce')
                 # Filtrar apenas valores positivos (saídas reais)
                 df_convertido = df_convertido[df_convertido['valor'] > 0]
-            
-            # Categoria baseada na descrição
-            if 'DescriçãoConta' in df.columns:
-                df_convertido['categoria'] = self._categorizar_automaticamente(df['DescriçãoConta'])
-            
-            # Campos adicionais
-            if 'Campo54' in df.columns:
-                df_convertido['id_movimento'] = df['Campo54']
-            
-            if 'NúmeroCheque' in df.columns:
-                df_convertido['numero_cheque'] = df['NúmeroCheque']
             
             # Adicionar campos de controle
             df_convertido['arquivo_origem'] = 'novo_modelo_contas_pagas'
@@ -160,10 +144,8 @@ class ContasPagasValidator:
                 return 'COMPRAS/FORNECEDORES'
             elif any(palavra in descricao for palavra in ['FOLHA', 'SALÁRIO', 'FUNCIONÁRIO']):
                 return 'PESSOAL'
-            elif any(palavra in descricao for palavra in ['LUZ', 'ÁGUA', 'TELEFONE', 'INTERNET']):
-                return 'UTILIDADES'
-            elif any(palavra in descricao for palavra in ['ALUGUEL', 'IMÓVEL']):
-                return 'IMÓVEIS'
+            elif any(palavra in descricao for palavra in ['LUZ', 'ÁGUA', 'TELEFONE', 'INTERNET', 'ALUGUEL']):
+                return 'ADMINISTRATIVO'
             elif any(palavra in descricao for palavra in ['EMPRÉSTIMO', 'FINANCIAMENTO']):
                 return 'FINANCIAMENTOS'
             else:
@@ -213,7 +195,7 @@ class ContasPagasValidator:
                 'inicio': df['data_pagamento'].min(),
                 'fim': df['data_pagamento'].max()
             },
-            'empresas_unicas': df['empresa'].nunique() if 'empresa' in df.columns else 0,
+            'contas_correntes_unicas': df['conta_corrente'].nunique() if 'conta_corrente' in df.columns else 0,
             'categorias': df['categoria'].value_counts().to_dict() if 'categoria' in df.columns else {}
         }
         
@@ -315,7 +297,61 @@ class ComparadorContasAPagarVsPagas:
             'diferencas_prazo': len(resultado['diferencas_prazo'])
         })
         
+        # Adicionar estatísticas específicas de correspondência por histórico
+        resultado['resumo']['correspondencias_por_historico'] = len(
+            resultado.get('correspondencias_por_historico', pd.DataFrame())
+        )
+        
+        # Separar correspondências por tipo para relatório detalhado
+        resultado['correspondencias_por_id'] = self._extrair_correspondencias_por_tipo(
+            resultado['correspondencias_exatas'], 'id_movimento'
+        )
+        resultado['correspondencias_por_chave'] = self._extrair_correspondencias_por_tipo(
+            resultado['correspondencias_exatas'], 'chave_comparacao'
+        )
+        resultado['correspondencias_por_historico'] = self._extrair_correspondencias_por_tipo(
+            resultado['correspondencias_exatas'], 'historico_norm'
+        )
+        
         return resultado
+    
+    def _extrair_correspondencias_por_tipo(self, correspondencias: pd.DataFrame, tipo: str) -> pd.DataFrame:
+        """
+        Extrai correspondências de um tipo específico do DataFrame de correspondências.
+        """
+        if correspondencias.empty:
+            return pd.DataFrame()
+        
+        if tipo == 'id_movimento':
+            # Correspondências que têm ID válido em ambos os lados
+            mask = (correspondencias.get('id_movimento_a_pagar', pd.Series()).notna() & 
+                   correspondencias.get('id_movimento_pagas', pd.Series()).notna())
+            return correspondencias[mask] if mask.any() else pd.DataFrame()
+            
+        elif tipo == 'chave_comparacao':
+            # Correspondências que têm chave válida mas não vieram por ID nem por histórico
+            mask = correspondencias.get('chave_comparacao', pd.Series()).notna()
+            
+            # Excluir as que já foram por ID
+            if 'id_movimento_a_pagar' in correspondencias.columns and 'id_movimento_pagas' in correspondencias.columns:
+                mask_tem_id = (correspondencias['id_movimento_a_pagar'].notna() & 
+                              correspondencias['id_movimento_pagas'].notna())
+                mask = mask & ~mask_tem_id
+            
+            # Excluir as que foram por histórico (verificando se existe a coluna historico_norm da correspondência)
+            if 'historico_norm' in correspondencias.columns:
+                mask_tem_historico = correspondencias['historico_norm'].notna()
+                mask = mask & ~mask_tem_historico
+            
+            return correspondencias[mask] if mask.any() else pd.DataFrame()
+            
+        elif tipo == 'historico_norm':
+            # Correspondências que têm histórico válido
+            # A coluna 'historico_norm' existe quando a correspondência foi feita por histórico
+            mask = correspondencias.get('historico_norm', pd.Series()).notna()
+            return correspondencias[mask] if mask.any() else pd.DataFrame()
+        
+        return pd.DataFrame()
     
     def _preparar_dataset_comparacao(self, df: pd.DataFrame, tipo: str) -> pd.DataFrame:
         """
@@ -329,7 +365,7 @@ class ComparadorContasAPagarVsPagas:
         # Normalizar nomes das colunas primeiro
         df_prep.columns = [col.lower().replace(' ', '_') for col in df_prep.columns]
         
-        # Mapear colunas específicas do modelo de contas a pagar
+        # Mapear colunas específicas dos modelos
         if tipo == 'a_pagar':
             column_mapping = {
                 'empresa': 'empresa',
@@ -337,42 +373,50 @@ class ComparadorContasAPagarVsPagas:
                 'valordoc': 'valor',
                 'descriçãoconta': 'descricao',
                 'datavencimento': 'data_vencimento',
-                'histórico': 'historico'
+                'histórico': 'historico',
+                'idmovimento': 'id_movimento'
             }
-            
-            # Renomear colunas se existirem
-            for old_name, new_name in column_mapping.items():
-                if old_name in df_prep.columns:
-                    df_prep = df_prep.rename(columns={old_name: new_name})
+        else:  # tipo == 'pagas'
+            column_mapping = {
+                'idbanco': 'empresa',
+                'saída': 'valor',
+                'descriçãoconta': 'descricao',
+                'datapagamento': 'data_pagamento',
+                'histórico': 'historico',
+                'campo54': 'id_movimento'
+            }
+        
+        # Renomear colunas se existirem
+        for old_name, new_name in column_mapping.items():
+            if old_name in df_prep.columns:
+                df_prep = df_prep.rename(columns={old_name: new_name})
         
         # Verificar se as colunas necessárias existem
-        if 'empresa' not in df_prep.columns:
-            print("⚠️ Coluna 'empresa' não encontrada")
+        if 'valor' not in df_prep.columns:
+            print(f"⚠️ Coluna 'valor' não encontrada para tipo '{tipo}'. Colunas disponíveis: {list(df_prep.columns)}")
             return df_prep
             
-        if 'valor' not in df_prep.columns:
-            print("⚠️ Coluna 'valor' não encontrada")
+        if 'descricao' not in df_prep.columns:
+            print(f"⚠️ Coluna 'descricao' não encontrada para tipo '{tipo}'. Colunas disponíveis: {list(df_prep.columns)}")
             return df_prep
         
         # Normalizar strings para comparação
-        df_prep['empresa_norm'] = df_prep['empresa'].astype(str).str.upper().str.strip()
+        df_prep['descricao_norm'] = df_prep['descricao'].astype(str).str.upper().str.strip()
         
-        if 'fornecedor' in df_prep.columns:
-            df_prep['fornecedor_norm'] = df_prep['fornecedor'].astype(str).str.upper().str.strip()
-        else:
-            df_prep['fornecedor_norm'] = ''
-            
+        # Para comparação, usar apenas descricao e valor (mais data quando disponível)
+        # Não usar empresa/conta_corrente/fornecedor na chave de comparação
+        df_prep['valor_norm'] = df_prep['valor'].round(2)
+        
         if 'descricao' in df_prep.columns:
             df_prep['descricao_norm'] = df_prep['descricao'].astype(str).str.upper().str.strip()
         else:
             df_prep['descricao_norm'] = ''
         
-        # Criar chave de comparação
+        # Criar chave de comparação baseada em descrição e valor
         try:
             df_prep['chave_comparacao'] = (
-                df_prep['empresa_norm'] + '_' + 
-                df_prep['fornecedor_norm'] + '_' + 
-                df_prep['valor'].round(2).astype(str)
+                df_prep['descricao_norm'] + '_' + 
+                df_prep['valor_norm'].astype(str)
             )
             print(f"✅ Chave de comparação criada para {len(df_prep)} registros")
         except (ValueError, KeyError) as e:
@@ -386,61 +430,206 @@ class ComparadorContasAPagarVsPagas:
     
     def _encontrar_correspondencias_exatas(self, df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame) -> pd.DataFrame:
         """
-        Encontra correspondências exatas entre os datasets.
+        Encontra correspondências exatas entre os datasets usando múltiplas estratégias.
         """
-        # Merge baseado na chave de comparação
-        correspondencias = pd.merge(
-            df_a_pagar, df_pagas, 
-            on='chave_comparacao', 
-            suffixes=('_a_pagar', '_pagas'),
-            how='inner'
-        )
+        correspondencias_totais = pd.DataFrame()
         
-        return correspondencias
+        # Estratégia 1: Correspondência por ID (mais confiável)
+        if 'id_movimento' in df_a_pagar.columns and 'id_movimento' in df_pagas.columns:
+            print("🔍 Buscando correspondências por ID...")
+            correspondencias_id = pd.merge(
+                df_a_pagar, df_pagas,
+                on='id_movimento',
+                suffixes=('_a_pagar', '_pagas'),
+                how='inner'
+            )
+            if not correspondencias_id.empty:
+                print(f"✅ Encontradas {len(correspondencias_id)} correspondências por ID")
+                correspondencias_totais = pd.concat([correspondencias_totais, correspondencias_id], ignore_index=True)
+        
+        # Estratégia 2: Correspondência por chave (descrição + valor)
+        if 'chave_comparacao' in df_a_pagar.columns and 'chave_comparacao' in df_pagas.columns:
+            print("🔍 Buscando correspondências por chave de comparação...")
+            
+            # Remover IDs já correspondidos
+            ids_ja_correspondidos = set()
+            if not correspondencias_totais.empty and 'id_movimento_a_pagar' in correspondencias_totais.columns:
+                ids_ja_correspondidos.update(correspondencias_totais['id_movimento_a_pagar'].dropna())
+            
+            df_a_pagar_restante = df_a_pagar[~df_a_pagar['id_movimento'].isin(ids_ja_correspondidos)] if ids_ja_correspondidos else df_a_pagar
+            
+            ids_pagas_correspondidos = set()
+            if not correspondencias_totais.empty and 'id_movimento_pagas' in correspondencias_totais.columns:
+                ids_pagas_correspondidos.update(correspondencias_totais['id_movimento_pagas'].dropna())
+            
+            df_pagas_restante = df_pagas[~df_pagas['id_movimento'].isin(ids_pagas_correspondidos)] if ids_pagas_correspondidos else df_pagas
+            
+            correspondencias_chave = pd.merge(
+                df_a_pagar_restante, df_pagas_restante,
+                on='chave_comparacao',
+                suffixes=('_a_pagar', '_pagas'),
+                how='inner'
+            )
+            
+            if not correspondencias_chave.empty:
+                print(f"✅ Encontradas {len(correspondencias_chave)} correspondências por chave")
+                correspondencias_totais = pd.concat([correspondencias_totais, correspondencias_chave], ignore_index=True)
+        
+        # Estratégia 3: Correspondência por histórico 100% exato
+        if 'historico' in df_a_pagar.columns and 'historico' in df_pagas.columns:
+            print("🔍 Buscando correspondências por histórico exato...")
+            
+            # Remover registros já correspondidos
+            ids_ja_correspondidos_a_pagar = set()
+            ids_ja_correspondidos_pagas = set()
+            
+            if not correspondencias_totais.empty:
+                if 'id_movimento_a_pagar' in correspondencias_totais.columns:
+                    ids_ja_correspondidos_a_pagar.update(correspondencias_totais['id_movimento_a_pagar'].dropna())
+                if 'id_movimento_pagas' in correspondencias_totais.columns:
+                    ids_ja_correspondidos_pagas.update(correspondencias_totais['id_movimento_pagas'].dropna())
+            
+            df_a_pagar_historico = df_a_pagar.copy()
+            df_pagas_historico = df_pagas.copy()
+            
+            if ids_ja_correspondidos_a_pagar:
+                df_a_pagar_historico = df_a_pagar_historico[~df_a_pagar_historico['id_movimento'].isin(ids_ja_correspondidos_a_pagar)]
+            if ids_ja_correspondidos_pagas:
+                df_pagas_historico = df_pagas_historico[~df_pagas_historico['id_movimento'].isin(ids_ja_correspondidos_pagas)]
+            
+            # Normalizar históricos para comparação
+            df_a_pagar_historico['historico_norm'] = df_a_pagar_historico['historico'].astype(str).str.upper().str.strip()
+            df_pagas_historico['historico_norm'] = df_pagas_historico['historico'].astype(str).str.upper().str.strip()
+            
+            # Filtrar históricos válidos (não vazios, não "NAN")
+            mask_a_pagar = (df_a_pagar_historico['historico_norm'] != '') & (df_a_pagar_historico['historico_norm'] != 'NAN') & (df_a_pagar_historico['historico_norm'].str.len() > 3)
+            mask_pagas = (df_pagas_historico['historico_norm'] != '') & (df_pagas_historico['historico_norm'] != 'NAN') & (df_pagas_historico['historico_norm'].str.len() > 3)
+            
+            df_a_pagar_historico = df_a_pagar_historico[mask_a_pagar]
+            df_pagas_historico = df_pagas_historico[mask_pagas]
+            
+            if not df_a_pagar_historico.empty and not df_pagas_historico.empty:
+                correspondencias_historico = pd.merge(
+                    df_a_pagar_historico, df_pagas_historico,
+                    on='historico_norm',
+                    suffixes=('_a_pagar', '_pagas'),
+                    how='inner'
+                )
+                
+                if not correspondencias_historico.empty:
+                    print(f"✅ Encontradas {len(correspondencias_historico)} correspondências por histórico exato")
+                    correspondencias_totais = pd.concat([correspondencias_totais, correspondencias_historico], ignore_index=True)
+        
+        return correspondencias_totais
     
     def _encontrar_correspondencias_aproximadas(self, df_a_pagar: pd.DataFrame, df_pagas: pd.DataFrame, 
                                               correspondencias_exatas: pd.DataFrame) -> pd.DataFrame:
         """
-        Encontra correspondências aproximadas (valores similares, empresas iguais).
+        Encontra correspondências aproximadas usando diferentes critérios.
         """
-        # Remover itens já encontrados nas correspondências exatas
-        chaves_exatas = set(correspondencias_exatas['chave_comparacao'].unique()) if not correspondencias_exatas.empty else set()
-        
-        df_a_pagar_restante = df_a_pagar[~df_a_pagar['chave_comparacao'].isin(chaves_exatas)]
-        df_pagas_restante = df_pagas[~df_pagas['chave_comparacao'].isin(chaves_exatas)]
-        
         correspondencias_aprox = []
         
-        for _, conta_pagar in df_a_pagar_restante.iterrows():
-            # Buscar pagamentos da mesma empresa com valor similar
-            candidatos = df_pagas_restante[
-                (df_pagas_restante['empresa_norm'] == conta_pagar['empresa_norm']) &
+        # Identificar registros já correspondidos exatamente
+        ids_ja_correspondidos_a_pagar = set()
+        ids_ja_correspondidos_pagas = set()
+        
+        if not correspondencias_exatas.empty:
+            # Usar diferentes colunas dependendo de como foram feitas as correspondências
+            if 'id_movimento_a_pagar' in correspondencias_exatas.columns:
+                ids_ja_correspondidos_a_pagar.update(correspondencias_exatas['id_movimento_a_pagar'].dropna())
+            if 'id_movimento_pagas' in correspondencias_exatas.columns:
+                ids_ja_correspondidos_pagas.update(correspondencias_exatas['id_movimento_pagas'].dropna())
+            
+            # Fallback usando chave de comparação
+            if 'chave_comparacao' in correspondencias_exatas.columns:
+                chaves_exatas = set(correspondencias_exatas['chave_comparacao'].dropna())
+                df_a_pagar_restante = df_a_pagar[~df_a_pagar['chave_comparacao'].isin(chaves_exatas)]
+                df_pagas_restante = df_pagas[~df_pagas['chave_comparacao'].isin(chaves_exatas)]
+            else:
+                df_a_pagar_restante = df_a_pagar
+                df_pagas_restante = df_pagas
+        else:
+            df_a_pagar_restante = df_a_pagar
+            df_pagas_restante = df_pagas
+        
+        # Remover também por ID se disponível
+        if ids_ja_correspondidos_a_pagar:
+            df_a_pagar_restante = df_a_pagar_restante[~df_a_pagar_restante['id_movimento'].isin(ids_ja_correspondidos_a_pagar)]
+        if ids_ja_correspondidos_pagas:
+            df_pagas_restante = df_pagas_restante[~df_pagas_restante['id_movimento'].isin(ids_ja_correspondidos_pagas)]
+        
+        print(f"🔍 Buscando correspondências aproximadas em {len(df_a_pagar_restante)} contas a pagar restantes...")
+        
+        for idx, conta_pagar in df_a_pagar_restante.iterrows():
+            if 'valor' not in conta_pagar or pd.isna(conta_pagar['valor']):
+                continue
+                
+            # Critério 1: Valor exato + descrição similar (mais de 5 caracteres em comum)
+            candidatos_valor_exato = df_pagas_restante[df_pagas_restante['valor'] == conta_pagar['valor']]
+            if not candidatos_valor_exato.empty and 'descricao_norm' in conta_pagar:
+                desc_conta = str(conta_pagar['descricao_norm'])
+                for _, candidato in candidatos_valor_exato.iterrows():
+                    desc_candidato = str(candidato['descricao_norm'])
+                    if len(desc_conta) >= 5 and len(desc_candidato) >= 5:
+                        # Verificar se pelo menos 5 caracteres consecutivos coincidem
+                        if any(desc_conta[i:i+5] in desc_candidato for i in range(len(desc_conta)-4)):
+                            correspondencias_aprox.append({
+                                'tipo': 'valor_exato_desc_similar',
+                                'conta_a_pagar_idx': idx,
+                                'conta_paga_idx': candidato.name,
+                                'diferenca_valor': 0,
+                                'similaridade_desc': 'alta'
+                            })
+                            continue
+            
+            # Critério 2: Valor aproximado (tolerância de R$ 1,00) + mesma descrição
+            candidatos_valor_aprox = df_pagas_restante[
                 (abs(df_pagas_restante['valor'] - conta_pagar['valor']) <= self.tolerancia_valor)
             ]
             
-            if not candidatos.empty:
-                # Pegar o candidato mais próximo por valor
-                melhor_candidato = candidatos.iloc[
-                    (candidatos['valor'] - conta_pagar['valor']).abs().argmin()
-                ]
-                
-                correspondencias_aprox.append({
-                    'id_a_pagar': conta_pagar.get('id', ''),
-                    'id_pagas': melhor_candidato.get('id', ''),
-                    'empresa_a_pagar': conta_pagar['empresa'],
-                    'empresa_pagas': melhor_candidato['empresa'],
-                    'valor_a_pagar': conta_pagar['valor'],
-                    'valor_pagas': melhor_candidato['valor'],
-                    'diferenca_valor': melhor_candidato['valor'] - conta_pagar['valor'],
-                    'data_vencimento': conta_pagar.get('data_vencimento'),
-                    'data_pagamento': melhor_candidato.get('data_pagamento'),
-                    'fornecedor_a_pagar': conta_pagar.get('fornecedor', ''),
-                    'fornecedor_pagas': melhor_candidato.get('fornecedor', ''),
-                    'descricao_a_pagar': conta_pagar['descricao'],
-                    'descricao_pagas': melhor_candidato['descricao']
-                })
+            if not candidatos_valor_aprox.empty:
+                for _, candidato in candidatos_valor_aprox.iterrows():
+                    if 'descricao_norm' in conta_pagar and candidato['descricao_norm'] == conta_pagar['descricao_norm']:
+                        diferenca = abs(candidato['valor'] - conta_pagar['valor'])
+                        correspondencias_aprox.append({
+                            'tipo': 'valor_aprox_desc_exata',
+                            'conta_a_pagar_idx': idx,
+                            'conta_paga_idx': candidato.name,
+                            'diferenca_valor': diferenca,
+                            'similaridade_desc': 'exata'
+                        })
         
-        return pd.DataFrame(correspondencias_aprox)
+        # Converter para DataFrame
+        if correspondencias_aprox:
+            df_correspondencias_aprox = pd.DataFrame(correspondencias_aprox)
+            
+            # Adicionar dados das contas
+            result_data = []
+            for _, corresp in df_correspondencias_aprox.iterrows():
+                conta_pagar = df_a_pagar_restante.loc[corresp['conta_a_pagar_idx']]
+                conta_paga = df_pagas_restante.loc[corresp['conta_paga_idx']]
+                
+                row_data = {}
+                # Adicionar dados da conta a pagar
+                for col in conta_pagar.index:
+                    row_data[f'{col}_a_pagar'] = conta_pagar[col]
+                
+                # Adicionar dados da conta paga
+                for col in conta_paga.index:
+                    row_data[f'{col}_pagas'] = conta_paga[col]
+                
+                # Adicionar metadados da correspondência
+                row_data.update({
+                    'tipo_correspondencia': corresp['tipo'],
+                    'diferenca_valor': corresp['diferenca_valor'],
+                    'similaridade_desc': corresp['similaridade_desc']
+                })
+                
+                result_data.append(row_data)
+            
+            return pd.DataFrame(result_data)
+        
+        return pd.DataFrame()
     
     def _identificar_contas_nao_pagas(self, df_a_pagar: pd.DataFrame, 
                                     correspondencias_exatas: pd.DataFrame,
@@ -448,19 +637,21 @@ class ComparadorContasAPagarVsPagas:
         """
         Identifica contas a pagar que não têm correspondência nas contas pagas.
         """
-        # IDs das contas que já têm correspondência
-        ids_correspondidos = set()
+        # Chaves das contas que já têm correspondência
+        chaves_correspondidas = set()
         
-        if not correspondencias_exatas.empty:
-            ids_correspondidos.update(correspondencias_exatas['id_a_pagar'].dropna())
+        if not correspondencias_exatas.empty and 'chave_comparacao' in correspondencias_exatas.columns:
+            chaves_correspondidas.update(correspondencias_exatas['chave_comparacao'].dropna())
         
-        if not correspondencias_aproximadas.empty:
-            ids_correspondidos.update(correspondencias_aproximadas['id_a_pagar'].dropna())
+        if not correspondencias_aproximadas.empty and 'chave_comparacao' in correspondencias_aproximadas.columns:
+            chaves_correspondidas.update(correspondencias_aproximadas['chave_comparacao'].dropna())
         
-        # Filtrar contas sem correspondência
-        contas_nao_pagas = df_a_pagar[
-            ~df_a_pagar.get('id', pd.Series(range(len(df_a_pagar)))).isin(ids_correspondidos)
-        ].copy()
+        # Filtrar contas sem correspondência usando chave de comparação
+        if 'chave_comparacao' in df_a_pagar.columns:
+            contas_nao_pagas = df_a_pagar[~df_a_pagar['chave_comparacao'].isin(chaves_correspondidas)].copy()
+        else:
+            # Fallback se não há chave de comparação
+            contas_nao_pagas = df_a_pagar.copy()
         
         return contas_nao_pagas
     
@@ -470,19 +661,21 @@ class ComparadorContasAPagarVsPagas:
         """
         Identifica pagamentos que não têm correspondência nas contas a pagar.
         """
-        # IDs dos pagamentos que já têm correspondência
-        ids_correspondidos = set()
+        # Chaves dos pagamentos que já têm correspondência
+        chaves_correspondidas = set()
         
-        if not correspondencias_exatas.empty:
-            ids_correspondidos.update(correspondencias_exatas['id_pagas'].dropna())
+        if not correspondencias_exatas.empty and 'chave_comparacao' in correspondencias_exatas.columns:
+            chaves_correspondidas.update(correspondencias_exatas['chave_comparacao'].dropna())
         
-        if not correspondencias_aproximadas.empty:
-            ids_correspondidos.update(correspondencias_aproximadas['id_pagas'].dropna())
+        if not correspondencias_aproximadas.empty and 'chave_comparacao' in correspondencias_aproximadas.columns:
+            chaves_correspondidas.update(correspondencias_aproximadas['chave_comparacao'].dropna())
         
-        # Filtrar pagamentos sem correspondência
-        pagamentos_sem_conta = df_pagas[
-            ~df_pagas.get('id', pd.Series(range(len(df_pagas)))).isin(ids_correspondidos)
-        ].copy()
+        # Filtrar pagamentos sem correspondência usando chave de comparação
+        if 'chave_comparacao' in df_pagas.columns:
+            pagamentos_sem_conta = df_pagas[~df_pagas['chave_comparacao'].isin(chaves_correspondidas)].copy()
+        else:
+            # Fallback se não há chave de comparação
+            pagamentos_sem_conta = df_pagas.copy()
         
         return pagamentos_sem_conta
     

@@ -198,33 +198,23 @@ def mostrar_upload_validacao(supabase_client):
                         if st.button("💾 Salvar Contas Pagas no Banco", type="primary", use_container_width=True):
                             with st.spinner("Salvando dados no banco..."):
                                 try:
-                                    # Converter para formato do banco
-                                    for _, row in df_convertido.iterrows():
-                                        dados_conta = {
-                                            'empresa': row['empresa'],
-                                            'fornecedor': row.get('fornecedor', ''),
-                                            'valor': float(row['valor']),
-                                            'data_pagamento': row['data_pagamento'].strftime('%Y-%m-%d'),
-                                            'descricao': row['descricao'],
-                                            'categoria': row.get('categoria', 'OUTROS'),
-                                            'arquivo_origem': row.get('arquivo_origem', uploaded_file.name),
-                                            'processamento_id': row.get('processamento_id', ''),
-                                            'historico': row.get('historico', ''),
-                                            'numero_cheque': row.get('numero_cheque', ''),
-                                            'id_movimento': row.get('id_movimento', '')
-                                        }
-                                        
-                                        resultado = supabase_client.inserir_conta_paga(dados_conta)
-                                        
-                                        if not resultado['success']:
-                                            st.error(f"Erro ao salvar: {resultado['message']}")
-                                            break
-                                    else:
-                                        st.success(f"✅ {len(df_convertido)} contas pagas salvas com sucesso!")
+                                    # Usar o método mais eficiente para múltiplas inserções
+                                    resultado = supabase_client.inserir_contas_pagas(
+                                        df=df_convertido,
+                                        arquivo_origem=uploaded_file.name,
+                                        verificar_duplicatas=True
+                                    )
+                                    
+                                    if resultado['success']:
+                                        st.success(f"✅ {resultado['registros_inseridos']} contas pagas salvas com sucesso!")
+                                        if resultado.get('duplicatas_ignoradas', 0) > 0:
+                                            st.info(f"ℹ️ {resultado['duplicatas_ignoradas']} duplicatas foram ignoradas")
                                         st.balloons()
+                                    else:
+                                        st.error(f"❌ Erro ao salvar: {resultado.get('message', resultado.get('error', 'Erro desconhecido'))}")
                                         
                                 except Exception as e:
-                                    st.error(f"Erro ao salvar no banco: {str(e)}")
+                                    st.error(f"❌ Erro ao salvar no banco: {str(e)}")
                     
                     with col2:
                         # Botão para download dos dados convertidos
@@ -319,21 +309,25 @@ def mostrar_comparacao_datasets(supabase_client):
         st.divider()
         st.subheader("📊 Resumo da Comparação")
         
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             st.metric("🎯 Exatas", resultado_comparacao['resumo']['correspondencias_exatas'])
         with col2:
-            st.metric("🔍 Aproximadas", resultado_comparacao['resumo']['correspondencias_aproximadas'])
+            st.metric("� Por Histórico", resultado_comparacao['resumo'].get('correspondencias_por_historico', 0))
         with col3:
-            st.metric("❌ Não Pagas", resultado_comparacao['resumo']['contas_nao_pagas'])
+            st.metric("�🔍 Aproximadas", resultado_comparacao['resumo']['correspondencias_aproximadas'])
         with col4:
+            st.metric("❌ Não Pagas", resultado_comparacao['resumo']['contas_nao_pagas'])
+        with col5:
             st.metric("❓ Sem Conta", resultado_comparacao['resumo']['pagamentos_sem_conta'])
         
         # Tabs para diferentes análises
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "🎯 Correspondências Exatas", 
-            "🔍 Correspondências Aproximadas",
+            "� Por Histórico 100%",
+            "🆔 Por ID",
+            "🔑 Por Chave",
             "❌ Contas Não Pagas",
             "❓ Pagamentos Sem Conta"
         ])
@@ -341,44 +335,115 @@ def mostrar_comparacao_datasets(supabase_client):
         with tab1:
             if not resultado_comparacao['correspondencias_exatas'].empty:
                 st.success(f"✅ {len(resultado_comparacao['correspondencias_exatas'])} correspondências exatas encontradas")
+                
+                # Mostrar estatísticas por tipo
+                por_id = len(resultado_comparacao.get('correspondencias_por_id', pd.DataFrame()))
+                por_historico = len(resultado_comparacao.get('correspondencias_por_historico', pd.DataFrame()))
+                por_chave = len(resultado_comparacao.get('correspondencias_por_chave', pd.DataFrame()))
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.info(f"🆔 Por ID: {por_id}")
+                with col2:
+                    st.info(f"📋 Por Histórico: {por_historico}")
+                with col3:
+                    st.info(f"🔑 Por Chave: {por_chave}")
+                
                 st.dataframe(resultado_comparacao['correspondencias_exatas'], use_container_width=True)
             else:
                 st.info("ℹ️ Nenhuma correspondência exata encontrada")
         
         with tab2:
-            if not resultado_comparacao['correspondencias_aproximadas'].empty:
-                st.warning(f"⚠️ {len(resultado_comparacao['correspondencias_aproximadas'])} correspondências aproximadas encontradas")
-                st.dataframe(resultado_comparacao['correspondencias_aproximadas'], use_container_width=True)
+            # Tab específica para correspondências por histórico
+            correspondencias_historico = resultado_comparacao.get('correspondencias_por_historico', pd.DataFrame())
+            if not correspondencias_historico.empty:
+                st.success(f"📋 {len(correspondencias_historico)} correspondências por histórico 100% exato encontradas!")
+                
+                st.info("✨ **Históricos que bateram perfeitamente:**")
+                
+                # Mostrar apenas as colunas mais importantes
+                colunas_historico = []
+                for col in ['historico_a_pagar', 'valor_a_pagar', 'descricao_a_pagar', 
+                           'historico_pagas', 'valor_pagas', 'descricao_pagas']:
+                    if col in correspondencias_historico.columns:
+                        colunas_historico.append(col)
+                
+                if colunas_historico:
+                    st.dataframe(correspondencias_historico[colunas_historico], use_container_width=True)
+                else:
+                    st.dataframe(correspondencias_historico, use_container_width=True)
+                
+                # Estatísticas das correspondências por histórico
+                if 'valor_a_pagar' in correspondencias_historico.columns:
+                    valor_total = correspondencias_historico['valor_a_pagar'].sum()
+                    st.metric("💰 Valor Total das Correspondências por Histórico", f"R$ {valor_total:,.2f}")
+                
             else:
-                st.info("ℹ️ Nenhuma correspondência aproximada encontrada")
+                st.info("ℹ️ Nenhuma correspondência por histórico 100% encontrada")
         
         with tab3:
+            # Tab para correspondências por ID
+            correspondencias_id = resultado_comparacao.get('correspondencias_por_id', pd.DataFrame())
+            if not correspondencias_id.empty:
+                st.success(f"🆔 {len(correspondencias_id)} correspondências por ID encontradas")
+                st.dataframe(correspondencias_id, use_container_width=True)
+            else:
+                st.info("ℹ️ Nenhuma correspondência por ID encontrada")
+        
+        with tab4:
+            # Tab para correspondências por chave
+            correspondencias_chave = resultado_comparacao.get('correspondencias_por_chave', pd.DataFrame())
+            if not correspondencias_chave.empty:
+                st.success(f"🔑 {len(correspondencias_chave)} correspondências por chave (descrição + valor) encontradas")
+                st.dataframe(correspondencias_chave, use_container_width=True)
+            else:
+                st.info("ℹ️ Nenhuma correspondência por chave encontrada")
+        
+        with tab5:
+            # Contas Não Pagas
             if not resultado_comparacao['contas_nao_pagas'].empty:
                 st.error(f"❌ {len(resultado_comparacao['contas_nao_pagas'])} contas ainda não foram pagas")
                 
-                # Análise por empresa
-                contas_nao_pagas_empresa = resultado_comparacao['contas_nao_pagas'].groupby('empresa').agg({
-                    'valor': ['sum', 'count']
-                }).round(2)
-                contas_nao_pagas_empresa.columns = ['Valor Total', 'Quantidade']
+                # Análise por empresa (se disponível) ou fornecedor
+                if 'empresa' in resultado_comparacao['contas_nao_pagas'].columns:
+                    grupo_col = 'empresa'
+                    titulo_grupo = 'Empresa'
+                elif 'fornecedor' in resultado_comparacao['contas_nao_pagas'].columns:
+                    grupo_col = 'fornecedor'
+                    titulo_grupo = 'Fornecedor'
+                else:
+                    grupo_col = 'categoria'
+                    titulo_grupo = 'Categoria'
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.dataframe(contas_nao_pagas_empresa, use_container_width=True)
-                
-                with col2:
-                    fig = px.bar(
-                        x=contas_nao_pagas_empresa.index,
-                        y=contas_nao_pagas_empresa['Valor Total'],
-                        title="Contas Não Pagas por Empresa"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                if grupo_col in resultado_comparacao['contas_nao_pagas'].columns:
+                    contas_nao_pagas_grupo = resultado_comparacao['contas_nao_pagas'].groupby(grupo_col).agg({
+                        'valor': ['sum', 'count']
+                    }).round(2)
+                    contas_nao_pagas_grupo.columns = ['Valor Total', 'Quantidade']
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.dataframe(contas_nao_pagas_grupo, use_container_width=True)
+                    
+                    with col2:
+                        fig = px.bar(
+                            x=contas_nao_pagas_grupo.index,
+                            y=contas_nao_pagas_grupo['Valor Total'],
+                            title=f"Contas Não Pagas por {titulo_grupo}"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
                 
                 st.dataframe(resultado_comparacao['contas_nao_pagas'], use_container_width=True)
             else:
                 st.success("✅ Todas as contas foram pagas!")
         
-        with tab4:
+        with tab6:
+            # Pagamentos Sem Conta
+            if not resultado_comparacao['pagamentos_sem_conta'].empty:
+                st.warning(f"❓ {len(resultado_comparacao['pagamentos_sem_conta'])} pagamentos sem conta correspondente")
+                st.dataframe(resultado_comparacao['pagamentos_sem_conta'], use_container_width=True)
+        with tab6:
+            # Pagamentos Sem Conta
             if not resultado_comparacao['pagamentos_sem_conta'].empty:
                 st.warning(f"❓ {len(resultado_comparacao['pagamentos_sem_conta'])} pagamentos sem conta correspondente")
                 st.dataframe(resultado_comparacao['pagamentos_sem_conta'], use_container_width=True)

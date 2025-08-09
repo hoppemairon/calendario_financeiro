@@ -428,15 +428,13 @@ class SupabaseClient(CompartilhamentoMixin):
                             data_pagamento = str(data_pagamento)
                     
                     # Tratar strings
-                    empresa = str(row.get('empresa', '')).strip() if not pd.isna(row.get('empresa', '')) else ''
-                    fornecedor = str(row.get('fornecedor', '')).strip() if not pd.isna(row.get('fornecedor', '')) else ''
+                    conta_corrente = str(row.get('conta_corrente', '')).strip() if not pd.isna(row.get('conta_corrente', '')) else ''
                     descricao = str(row.get('descricao', '')).strip() if not pd.isna(row.get('descricao', '')) else ''
                     categoria = str(row.get('categoria', '')).strip() if not pd.isna(row.get('categoria', '')) else ''
                     
                     registro = {
                         "usuario_id": self.user_id,
-                        "empresa": empresa,
-                        "fornecedor": fornecedor,
+                        "conta_corrente": conta_corrente,
                         "valor": valor,
                         "data_pagamento": data_pagamento,
                         "descricao": descricao,
@@ -492,7 +490,7 @@ class SupabaseClient(CompartilhamentoMixin):
                 "message": f"Erro ao inserir contas pagas: {str(e)}"
             }
     
-    def buscar_contas_pagas(self, empresa: str = None, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+    def buscar_contas_pagas(self, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
         """Busca contas pagas do usuário."""
         if not self.user_id:
             return pd.DataFrame()
@@ -501,8 +499,6 @@ class SupabaseClient(CompartilhamentoMixin):
             query = self.supabase.table("contas_pagas").select("*").eq("usuario_id", self.user_id).limit(10000)
             
             # Filtros opcionais
-            if empresa:
-                query = query.eq("empresa", empresa)
             if data_inicio:
                 query = query.gte("data_pagamento", data_inicio)
             if data_fim:
@@ -536,7 +532,7 @@ class SupabaseClient(CompartilhamentoMixin):
             # Garantir que o usuário existe
             self._garantir_usuario_existe()
             
-            # Preparar dados para inserção - incluindo a coluna fornecedor
+            # Preparar dados para inserção - incluindo a coluna conta_corrente
             # Gerar UUID válido para processamento_id se não for fornecido ou for inválido
             processamento_id = dados.get("processamento_id", "")
             if processamento_id:
@@ -553,8 +549,7 @@ class SupabaseClient(CompartilhamentoMixin):
             
             dados_conta = {
                 "usuario_id": self.user_id,
-                "empresa": str(dados.get("empresa", "")),
-                "fornecedor": str(dados.get("fornecedor", "")),
+                "conta_corrente": str(dados.get("conta_corrente", "")),
                 "valor": float(dados.get("valor", 0)),
                 "data_pagamento": dados.get("data_pagamento"),
                 "descricao": str(dados.get("descricao", "")),
