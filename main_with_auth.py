@@ -41,7 +41,7 @@ div[data-testid="metric-container"],
 div[data-testid="metric-container"] > div:first-child,
 div[data-testid="metric-container"] > div[data-testid="metric-label"],
 .stMetric > div:first-child {
-    font-size: 0.5rem !important;
+    font-size: 0.95rem !important;
     font-weight: normal !important;
     color: #6b7280 !important;
     line-height: 1.1 !important;
@@ -53,7 +53,7 @@ div[data-testid="metric-container"] > div[data-testid="metric-label"],
 div[data-testid="metric-container"] > div:nth-child(2),
 div[data-testid="metric-container"] > div[data-testid="metric-value"],
 .stMetric > div:nth-child(2) {
-    font-size: 0.65rem !important;
+    font-size: 0.95rem !important;
     font-weight: bold !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -66,7 +66,7 @@ div[data-testid="metric-container"] > div[data-testid="metric-value"],
 div[data-testid="metric-container"] > div:last-child,
 div[data-testid="metric-container"] > div[data-testid="metric-delta"],
 .stMetric > div:last-child {
-    font-size: 0.45rem !important;
+    font-size: 0.95rem !important;
     color: #9ca3af !important;
     line-height: 1.0 !important;
     height: auto !important;
@@ -80,7 +80,7 @@ div[data-testid="metric-container"] div,
 .stMetric span,
 .stMetric p,
 .stMetric div {
-    font-size: 0.65rem !important;
+    font-size: 0.95rem !important;
     line-height: 1.0 !important;
     white-space: nowrap !important;
 }
@@ -88,7 +88,7 @@ div[data-testid="metric-container"] div,
 /* Especificamente para valores monetários */
 div[data-testid="metric-container"] div[data-testid="metric-value"] span,
 div[data-testid="metric-container"] div[data-testid="metric-value"] {
-    font-size: 0.65rem !important;
+    font-size: 0.95rem !important;
     font-weight: bold !important;
     line-height: 1.0 !important;
 }
@@ -2272,18 +2272,37 @@ def ajustar_para_dia_util(data_original):
 def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
     """Mostra dados carregados do banco."""
     
+    # Verificar se é o usuário administrador para mostrar aba de compartilhamento
+    admin_user_id = "bde0a328-7d9f-4c91-a005-a1ee285c16fb"
+    is_admin = supabase_client.user_id == admin_user_id
+    
     # Tabs para diferentes visões
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🗓️ Calendário", 
-        "📊 Dados Atuais", 
-        "🏢 Por Empresa", 
-        "📋 Exportar", 
-        "🔍 Validação Contas Pagas"
-    ])
+    if is_admin:
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "🗓️ Calendário", 
+            "📊 Dados Atuais", 
+            "🏢 Por Empresa", 
+            "📋 Exportar", 
+            "🔍 Validação Contas Pagas",
+            "👥 Compartilhamento"
+        ])
+    else:
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "🗓️ Calendário", 
+            "📊 Dados Atuais", 
+            "🏢 Por Empresa", 
+            "📋 Exportar", 
+            "🔍 Validação Contas Pagas"
+        ])
     
     # Buscar dados uma vez para usar em todas as abas
-    df_a_pagar = supabase_client.buscar_contas_a_pagar()
-    df_pagas = supabase_client.buscar_contas_pagas()
+    # Se for admin, busca dados de todas as empresas
+    if is_admin:
+        df_a_pagar = supabase_client.buscar_todas_contas_a_pagar()
+        df_pagas = supabase_client.buscar_todas_contas_pagas()
+    else:
+        df_a_pagar = supabase_client.buscar_contas_a_pagar()
+        df_pagas = supabase_client.buscar_contas_pagas()
     
     with tab1:
         #st.header("📅 Calendário Financeiro")
@@ -2320,7 +2339,7 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
                 st.metric("Total", formatar_moeda_brasileira(total_valor), f"{len(df_pagas)} contas")
                 
                 # Mostrar dados (primeiros 10)
-                df_display = df_pagas[['empresa', 'valor', 'data_pagamento', 'descricao']].head(10).copy()
+                df_display = df_pagas[['conta_corrente', 'valor', 'data_pagamento', 'descricao']].head(10).copy()
                 df_display['valor'] = df_display['valor'].apply(formatar_moeda_brasileira)
                 df_display['data_pagamento'] = df_display['data_pagamento'].apply(formatar_data_brasileira)
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
@@ -2333,17 +2352,30 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
     with tab3:
         st.header("🏢 Análise por Empresa")
         
-        empresas = supabase_client.listar_empresas()
+        # Admin vê todas as empresas do sistema, usuários normais veem apenas suas empresas
+        if is_admin:
+            empresas = supabase_client.listar_todas_empresas()
+            st.info("🔧 **Modo Admin:** Visualizando dados de todas as empresas do sistema")
+        else:
+            empresas = supabase_client.listar_empresas()
         
         if empresas:
             empresa_selecionada = st.selectbox("Selecione uma empresa:", ["Todas"] + empresas)
             
             if empresa_selecionada == "Todas":
-                df_a_pagar = supabase_client.buscar_contas_a_pagar()
-                df_pagas = supabase_client.buscar_contas_pagas()
+                if is_admin:
+                    df_a_pagar = supabase_client.buscar_todas_contas_a_pagar()
+                    df_pagas = supabase_client.buscar_todas_contas_pagas()
+                else:
+                    df_a_pagar = supabase_client.buscar_contas_a_pagar()
+                    df_pagas = supabase_client.buscar_contas_pagas()
             else:
-                df_a_pagar = supabase_client.buscar_contas_a_pagar(empresa=empresa_selecionada)
-                df_pagas = supabase_client.buscar_contas_pagas()
+                if is_admin:
+                    df_a_pagar = supabase_client.buscar_todas_contas_a_pagar(empresa=empresa_selecionada)
+                    df_pagas = supabase_client.buscar_todas_contas_pagas()
+                else:
+                    df_a_pagar = supabase_client.buscar_contas_a_pagar(empresa=empresa_selecionada)
+                    df_pagas = supabase_client.buscar_contas_pagas()
                 # Filtrar pagas por conta_corrente se necessário (já que empresa não existe mais)
                 if not df_pagas.empty and 'conta_corrente' in df_pagas.columns:
                     df_pagas = df_pagas[df_pagas['conta_corrente'].str.contains(empresa_selecionada, na=False, case=False)]
@@ -2405,6 +2437,212 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
     with tab5:
         # Interface de validação de contas pagas
         mostrar_interface_validacao_contas_pagas(supabase_client)
+    
+    # Aba de compartilhamento (somente para admin)
+    if is_admin:
+        with tab6:
+            mostrar_interface_compartilhamento(supabase_client)
+
+def mostrar_interface_compartilhamento(supabase_client: SupabaseClient):
+    """Interface para gerenciar licenças de acesso entre usuários."""
+    st.header("👥 Gerenciamento de Licenças de Usuários")
+    
+    # Mostrar status de admin
+    st.success("🔧 **ADMIN GERAL** - Gerencie qual usuário pode ver **TODAS as movimentações** de outros usuários")
+    
+    # Buscar dados necessários
+    usuarios_df = supabase_client.listar_todos_usuarios()
+    
+    # Estatísticas gerais do sistema
+    st.subheader("📊 Estatísticas do Sistema")
+    col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
+    
+    with col_stats1:
+        st.metric("👥 Total de Usuários", len(usuarios_df))
+    
+    with col_stats2:
+        df_todas_a_pagar = supabase_client.buscar_todas_contas_a_pagar()
+        st.metric("� Total Contas a Pagar", len(df_todas_a_pagar))
+    
+    with col_stats3:
+        df_todas_pagas = supabase_client.buscar_todas_contas_pagas()
+        st.metric("✅ Total Contas Pagas", len(df_todas_pagas))
+    
+    with col_stats4:
+        empresas = supabase_client.listar_todas_empresas()
+        st.metric("🏢 Total de Empresas", len(empresas))
+    
+    st.divider()
+    
+    # Interface para conceder licença
+    st.subheader("🤝 Conceder Licença de Acesso Total")
+    
+    # Explicação clara
+    st.info("""
+    💡 **Como funciona a licença:**
+    - Selecione o **usuário que vai ganhar acesso** 
+    - Selecione o **usuário proprietário dos dados**
+    - O primeiro usuário poderá ver **TODAS as movimentações (contas a pagar e pagas)** do segundo usuário
+    """)
+    
+    if not usuarios_df.empty:
+        with st.form("conceder_licenca"):
+            col1, col2, col3 = st.columns([4, 4, 2])
+            
+            with col1:
+                # Usuário que VAI ACESSAR
+                usuarios_options = [""] + [f"{row['nome']} ({row['email']})" for _, row in usuarios_df.iterrows()]
+                usuario_acessante = st.selectbox(
+                    "👤 Usuário que vai ganhar acesso:", 
+                    usuarios_options, 
+                    help="Este usuário poderá ver os dados de outro usuário"
+                )
+            
+            with col2:
+                # Usuário PROPRIETÁRIO DOS DADOS  
+                usuario_proprietario = st.selectbox(
+                    "🗂️ Usuário proprietário dos dados:", 
+                    usuarios_options, 
+                    help="Usuário cujas movimentações serão visualizadas"
+                )
+            
+            with col3:
+                # Nível de acesso
+                nivel_acesso = st.selectbox("🔐 Nível:", ["viewer", "editor"], index=0)
+            
+            conceder_button = st.form_submit_button("🤝 Conceder Licença", type="primary", use_container_width=True)
+            
+            if conceder_button:
+                if usuario_acessante and usuario_proprietario and usuario_acessante != usuario_proprietario:
+                    # Extrair dados dos usuários
+                    email_acessante = usuario_acessante.split("(")[1].replace(")", "")
+                    email_proprietario = usuario_proprietario.split("(")[1].replace(")", "")
+                    
+                    usuario_acessante_info = usuarios_df[usuarios_df['email'] == email_acessante]
+                    usuario_proprietario_info = usuarios_df[usuarios_df['email'] == email_proprietario]
+                    
+                    if not usuario_acessante_info.empty and not usuario_proprietario_info.empty:
+                        # Criar licença usando session_state temporário
+                        if 'licencas_usuarios' not in st.session_state:
+                            st.session_state['licencas_usuarios'] = []
+                        
+                        licenca = {
+                            "usuario_acessante_id": usuario_acessante_info.iloc[0]['id'],
+                            "usuario_acessante_nome": usuario_acessante_info.iloc[0]['nome'],
+                            "usuario_acessante_email": email_acessante,
+                            "usuario_proprietario_id": usuario_proprietario_info.iloc[0]['id'],
+                            "usuario_proprietario_nome": usuario_proprietario_info.iloc[0]['nome'],
+                            "usuario_proprietario_email": email_proprietario,
+                            "nivel_acesso": nivel_acesso,
+                            "concedido_por": supabase_client.user_id,
+                            "ativo": True,
+                            "data_concessao": datetime.now().isoformat()
+                        }
+                        
+                        # Remover licença existente se houver
+                        st.session_state['licencas_usuarios'] = [
+                            l for l in st.session_state['licencas_usuarios'] 
+                            if not (l['usuario_acessante_id'] == licenca['usuario_acessante_id'] and 
+                                   l['usuario_proprietario_id'] == licenca['usuario_proprietario_id'])
+                        ]
+                        
+                        # Adicionar nova licença
+                        st.session_state['licencas_usuarios'].append(licenca)
+                        
+                        st.success(f"""
+                        ✅ **Licença concedida com sucesso!**
+                        
+                        **{usuario_acessante_info.iloc[0]['nome']}** agora pode visualizar **TODAS as movimentações** de **{usuario_proprietario_info.iloc[0]['nome']}**
+                        """)
+                        st.rerun()
+                    else:
+                        st.error("❌ Usuários não encontrados")
+                elif usuario_acessante == usuario_proprietario:
+                    st.error("❌ Um usuário não pode ser proprietário e acessante ao mesmo tempo")
+                else:
+                    st.error("❌ Selecione ambos os usuários")
+            
+            with col1:
+                # Selectbox de usuários
+                usuarios_options = [""] + [f"{row['nome']} ({row['email']})" for _, row in usuarios_df.iterrows()]
+                usuario_selecionado = st.selectbox("Selecione o usuário:", usuarios_options)
+            
+            with col2:
+                # Selectbox de empresas
+                empresa_selecionada = st.selectbox("Selecione a empresa:", [""] + empresas)
+            
+            with col3:
+                # Nível de acesso
+                nivel_acesso = st.selectbox("Nível de acesso:", ["viewer", "editor"], index=0)
+            
+            conceder_button = st.form_submit_button("🤝 Conceder Acesso", type="primary", use_container_width=True)
+            
+            if conceder_button:
+                if usuario_selecionado and empresa_selecionada:
+                    # Extrair ID do usuário selecionado
+                    usuario_email = usuario_selecionado.split("(")[1].replace(")", "")
+                    usuario_info = usuarios_df[usuarios_df['email'] == usuario_email]
+                    
+                    if not usuario_info.empty:
+                        usuario_id = usuario_info.iloc[0]['id']
+                        usuario_nome = usuario_info.iloc[0]['nome']
+                        
+                        resultado = supabase_client.criar_permissao_empresa(usuario_id, empresa_selecionada, nivel_acesso)
+                        if resultado["success"]:
+                            st.success(f"✅ Acesso '{nivel_acesso}' concedido para **{usuario_nome}** na empresa **{empresa_selecionada}**")
+                            st.rerun()
+                        else:
+                            st.error(resultado["error"])
+                    else:
+                        st.error("Usuário não encontrado")
+                else:
+                    st.error("Selecione um usuário e uma empresa")
+    
+    st.divider()
+    
+    # Mostrar permissões existentes (temporário usando session_state)
+    st.subheader("� Permissões Configuradas")
+    
+    permissoes_temp = st.session_state.get('permissoes_empresas', [])
+    if permissoes_temp:
+        # Converter para DataFrame para exibição
+        dados_permissoes = []
+        for perm in permissoes_temp:
+            if perm['ativo']:
+                usuario_info = usuarios_df[usuarios_df['id'] == perm['usuario_id']]
+                if not usuario_info.empty:
+                    dados_permissoes.append({
+                        'Usuario': usuario_info.iloc[0]['nome'],
+                        'Email': usuario_info.iloc[0]['email'],
+                        'Empresa': perm['empresa'],
+                        'Nível': perm['nivel_acesso'],
+                        'Data': perm['data_concessao'][:10]
+                    })
+        
+        if dados_permissoes:
+            df_permissoes = pd.DataFrame(dados_permissoes)
+            st.dataframe(df_permissoes, use_container_width=True, hide_index=True)
+        else:
+            st.info("📝 Nenhuma permissão ativa encontrada")
+    else:
+        st.info("📝 Nenhuma permissão configurada ainda")
+    
+    # Seção de usuários disponíveis
+    st.divider()
+    st.subheader("👥 Todos os Usuários do Sistema")
+    
+    if not usuarios_df.empty:
+        # Mostrar tabela de usuários
+        st.dataframe(
+            usuarios_df[['nome', 'email', 'empresa_padrao']], 
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                'nome': 'Nome',
+                'email': 'Email',
+                'empresa_padrao': 'Empresa Padrão'
+            }
+        )
 
 if __name__ == "__main__":
     main()

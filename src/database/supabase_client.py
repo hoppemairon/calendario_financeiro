@@ -994,3 +994,259 @@ class SupabaseClient(CompartilhamentoMixin):
         uniao = palavras1.union(palavras2)
         
         return len(intersecao) / len(uniao) if uniao else 0.0
+
+    # ==================== MÉTODOS DE ADMIN ====================
+    
+    def is_admin(self) -> bool:
+        """Verifica se o usuário atual é admin geral."""
+        admin_user_id = "bde0a328-7d9f-4c91-a005-a1ee285c16fb"
+        return self.user_id == admin_user_id
+    
+    def buscar_todas_contas_a_pagar(self, empresa: str = None, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+        """Busca contas a pagar de TODOS os usuários (somente para admin)."""
+        if not self.is_admin():
+            return self.buscar_contas_a_pagar(empresa, data_inicio, data_fim)
+        
+        try:
+            # Admin pode ver dados de todos os usuários
+            query = self.supabase.table("contas_a_pagar").select("*").order("data_vencimento", desc=False).order("id", desc=False).limit(10000)
+            
+            # Filtros opcionais
+            if empresa:
+                query = query.eq("empresa", empresa)
+            if data_inicio:
+                query = query.gte("data_vencimento", data_inicio)
+            if data_fim:
+                query = query.lte("data_vencimento", data_fim)
+            
+            response = query.execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"Erro ao buscar todas as contas a pagar: {e}")
+            return pd.DataFrame()
+    
+    def buscar_todas_contas_pagas(self, data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+        """Busca contas pagas de TODOS os usuários (somente para admin)."""
+        if not self.is_admin():
+            return self.buscar_contas_pagas(data_inicio, data_fim)
+        
+        try:
+            # Admin pode ver dados de todos os usuários
+            query = self.supabase.table("contas_pagas").select("*").limit(10000)
+            
+            # Filtros opcionais
+            if data_inicio:
+                query = query.gte("data_pagamento", data_inicio)
+            if data_fim:
+                query = query.lte("data_pagamento", data_fim)
+            
+            response = query.execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"Erro ao buscar todas as contas pagas: {e}")
+            return pd.DataFrame()
+    
+    def listar_todas_empresas(self) -> List[str]:
+        """Lista todas as empresas cadastradas no sistema (somente para admin)."""
+        if not self.is_admin():
+            return []
+        
+        try:
+            # Buscar empresas únicas de contas a pagar
+            response_a_pagar = self.supabase.table("contas_a_pagar").select("empresa").execute()
+            empresas_a_pagar = set()
+            if response_a_pagar.data:
+                empresas_a_pagar = {item['empresa'] for item in response_a_pagar.data if item.get('empresa')}
+            
+            return sorted(list(empresas_a_pagar))
+                
+        except Exception as e:
+            print(f"Erro ao listar empresas: {e}")
+            return []
+    
+    def listar_todos_usuarios(self) -> pd.DataFrame:
+        """Lista todos os usuários do sistema (somente para admin)."""
+        if not self.is_admin():
+            return pd.DataFrame()
+        
+        try:
+            response = self.supabase.table("usuarios").select("id, nome, email, empresa_padrao").execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"Erro ao listar usuários: {e}")
+            return pd.DataFrame()
+    
+    def criar_permissao_empresa(self, usuario_id: str, empresa: str, nivel_acesso: str = 'viewer') -> Dict[str, Any]:
+        """Cria permissão para um usuário acessar uma empresa específica (somente para admin)."""
+        if not self.is_admin():
+            return {"success": False, "error": "Acesso negado"}
+        
+        try:
+            # Criar registro na tabela usuarios_empresas (vamos criar uma estrutura simples)
+            permissao_data = {
+                "usuario_id": usuario_id,
+                "empresa": empresa,
+                "nivel_acesso": nivel_acesso,
+                "concedido_por": self.user_id,
+                "ativo": True,
+                "data_concessao": datetime.now().isoformat()
+            }
+            
+            # Usar upsert para atualizar se já existir
+            response = self.supabase.table("usuarios_empresas").upsert(permissao_data).execute()
+            
+            return {"success": True, "message": f"Permissão '{nivel_acesso}' concedida para empresa '{empresa}'"}
+        
+        except Exception as e:
+            # Se a tabela não existir, vamos usar session_state temporariamente
+            if 'permissoes_empresas' not in st.session_state:
+                st.session_state['permissoes_empresas'] = []
+            
+            # Adicionar à lista temporária
+            permissao = {
+                "usuario_id": usuario_id,
+                "empresa": empresa,
+                "nivel_acesso": nivel_acesso,
+                "concedido_por": self.user_id,
+                "ativo": True,
+                "data_concessao": datetime.now().isoformat()
+            }
+            
+            # Remover permissão existente se houver
+            st.session_state['permissoes_empresas'] = [
+                p for p in st.session_state['permissoes_empresas'] 
+                if not (p['usuario_id'] == usuario_id and p['empresa'] == empresa)
+            ]
+            
+            # Adicionar nova permissão
+            st.session_state['permissoes_empresas'].append(permissao)
+            
+            return {"success": True, "message": f"Permissão '{nivel_acesso}' concedida para empresa '{empresa}' (temporário)"}
+    
+    def listar_permissoes_empresas(self) -> pd.DataFrame:
+        """Lista todas as permissões de empresas (somente para admin)."""
+        if not self.is_admin():
+            return pd.DataFrame()
+        
+        try:
+            response = self.supabase.table("usuarios_empresas").select("*, usuarios(nome, email)").eq("ativo", True).execute()
+            
+            if response.data:
+                dados = []
+                for item in response.data:
+                    if item.get('usuarios'):
+                        dados.append({
+                            'usuario_id': item['usuario_id'],
+                            'nome': item['usuarios']['nome'],
+                            'email': item['usuarios']['email'],
+                            'empresa': item['empresa'],
+                            'nivel_acesso': item['nivel_acesso'],
+                            'data_concessao': item['data_concessao']
+                        })
+                return pd.DataFrame(dados)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            # Fallback para session_state se tabela não existir
+            permissoes = st.session_state.get('permissoes_empresas', [])
+            if permissoes:
+                # Buscar dados dos usuários
+                usuarios_df = self.listar_todos_usuarios()
+                dados = []
+                
+                for perm in permissoes:
+                    if perm['ativo']:
+                        usuario_info = usuarios_df[usuarios_df['id'] == perm['usuario_id']]
+                        if not usuario_info.empty:
+                            dados.append({
+                                'usuario_id': perm['usuario_id'],
+                                'nome': usuario_info.iloc[0]['nome'],
+                                'email': usuario_info.iloc[0]['email'],
+                                'empresa': perm['empresa'],
+                                'nivel_acesso': perm['nivel_acesso'],
+                                'data_concessao': perm['data_concessao']
+                            })
+                
+                return pd.DataFrame(dados)
+            
+            return pd.DataFrame()
+
+    def listar_todos_usuarios(self) -> pd.DataFrame:
+        """Lista todos os usuários do sistema (somente para admin)."""
+        if not self.is_admin():
+            return pd.DataFrame()
+        
+        try:
+            response = self.supabase.table("usuarios").select("id, nome, email, empresa_padrao").execute()
+            
+            if response.data:
+                return pd.DataFrame(response.data)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"Erro ao listar usuários: {e}")
+            return pd.DataFrame()
+    
+    def criar_permissao_empresa(self, usuario_id: str, empresa: str, nivel_acesso: str = 'viewer') -> Dict[str, Any]:
+        """Cria permissão para um usuário acessar uma empresa específica (somente para admin)."""
+        if not self.is_admin():
+            return {"success": False, "error": "Acesso negado"}
+        
+        try:
+            # Criar registro na tabela usuarios_empresas (vamos criar uma estrutura simples)
+            permissao_data = {
+                "usuario_id": usuario_id,
+                "empresa": empresa,
+                "nivel_acesso": nivel_acesso,
+                "concedido_por": self.user_id,
+                "ativo": True,
+                "data_concessao": datetime.now().isoformat()
+            }
+            
+            # Usar upsert para atualizar se já existir
+            response = self.supabase.table("usuarios_empresas").upsert(permissao_data).execute()
+            
+            return {"success": True, "message": f"Permissão '{nivel_acesso}' concedida para empresa '{empresa}'"}
+        
+        except Exception as e:
+            # Se a tabela não existir, vamos usar session_state temporariamente
+            if 'permissoes_empresas' not in st.session_state:
+                st.session_state['permissoes_empresas'] = []
+            
+            # Adicionar à lista temporária
+            permissao = {
+                "usuario_id": usuario_id,
+                "empresa": empresa,
+                "nivel_acesso": nivel_acesso,
+                "concedido_por": self.user_id,
+                "ativo": True,
+                "data_concessao": datetime.now().isoformat()
+            }
+            
+            # Remover permissão existente se houver
+            st.session_state['permissoes_empresas'] = [
+                p for p in st.session_state['permissoes_empresas'] 
+                if not (p['usuario_id'] == usuario_id and p['empresa'] == empresa)
+            ]
+            
+            # Adicionar nova permissão
+            st.session_state['permissoes_empresas'].append(permissao)
+            
+            return {"success": True, "message": f"Permissão '{nivel_acesso}' concedida para empresa '{empresa}' (temporário)"}
