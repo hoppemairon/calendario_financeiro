@@ -9,11 +9,19 @@ from dotenv import load_dotenv
 import pandas as pd
 from datetime import datetime
 import uuid
+import streamlit as st
 
 # Carregar variáveis de ambiente
 load_dotenv()
 
-class SupabaseClient:
+try:
+    from .compartilhamento import CompartilhamentoMixin
+except ImportError:
+    # Fallback se o módulo não existir
+    class CompartilhamentoMixin:
+        pass
+
+class SupabaseClient(CompartilhamentoMixin):
     """Cliente para interação com o banco Supabase."""
     
     def __init__(self):
@@ -212,7 +220,7 @@ class SupabaseClient:
                     "created_at": user.user.created_at
                 }
             return None
-        except:
+        except (AttributeError, ValueError):
             return None
     
     # ==================== CONTAS A PAGAR ====================
@@ -225,6 +233,15 @@ class SupabaseClient:
         try:
             # Verificar se o usuário existe na tabela usuarios
             self._garantir_usuario_existe()
+            
+            # Gerar UUID válido para processamento_id se não for fornecido ou for inválido
+            if processamento_id:
+                try:
+                    uuid.UUID(processamento_id)
+                except ValueError:
+                    processamento_id = str(uuid.uuid4())
+            else:
+                processamento_id = str(uuid.uuid4())
             
             # Verificar duplicatas se solicitado
             duplicatas_info = {"duplicatas": 0, "novos": len(df), "df_novos": df}
@@ -365,6 +382,15 @@ class SupabaseClient:
             # Verificar se o usuário existe na tabela usuarios
             self._garantir_usuario_existe()
             
+            # Gerar UUID válido para processamento_id se não for fornecido ou for inválido
+            if processamento_id:
+                try:
+                    uuid.UUID(processamento_id)
+                except ValueError:
+                    processamento_id = str(uuid.uuid4())
+            else:
+                processamento_id = str(uuid.uuid4())
+            
             # Verificar duplicatas se solicitado
             duplicatas_info = {"duplicatas": 0, "novos": len(df), "df_novos": df}
             if verificar_duplicatas:
@@ -403,18 +429,18 @@ class SupabaseClient:
                     
                     # Tratar strings
                     empresa = str(row.get('empresa', '')).strip() if not pd.isna(row.get('empresa', '')) else ''
+                    fornecedor = str(row.get('fornecedor', '')).strip() if not pd.isna(row.get('fornecedor', '')) else ''
                     descricao = str(row.get('descricao', '')).strip() if not pd.isna(row.get('descricao', '')) else ''
                     categoria = str(row.get('categoria', '')).strip() if not pd.isna(row.get('categoria', '')) else ''
-                    fornecedor = str(row.get('fornecedor', '')).strip() if not pd.isna(row.get('fornecedor', '')) else ''
                     
                     registro = {
                         "usuario_id": self.user_id,
                         "empresa": empresa,
+                        "fornecedor": fornecedor,
                         "valor": valor,
                         "data_pagamento": data_pagamento,
                         "descricao": descricao,
                         "categoria": categoria,
-                        "fornecedor": fornecedor,
                         "arquivo_origem": arquivo_origem,
                         "processamento_id": processamento_id
                     }
@@ -492,6 +518,65 @@ class SupabaseClient:
         except Exception as e:
             print(f"Erro ao buscar contas pagas: {e}")
             return pd.DataFrame()
+    
+    def inserir_conta_paga(self, dados: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Insere uma nova conta paga no banco.
+        
+        Args:
+            dados: Dicionário com os dados da conta paga
+            
+        Returns:
+            Dict com success (bool) e message/data
+        """
+        if not self.user_id:
+            return {"success": False, "message": "Usuário não autenticado"}
+
+        try:
+            # Garantir que o usuário existe
+            self._garantir_usuario_existe()
+            
+            # Preparar dados para inserção - incluindo a coluna fornecedor
+            # Gerar UUID válido para processamento_id se não for fornecido ou for inválido
+            processamento_id = dados.get("processamento_id", "")
+            if processamento_id:
+                # Verificar se é um UUID válido
+                try:
+                    uuid.UUID(processamento_id)
+                    # É um UUID válido, manter
+                except ValueError:
+                    # Não é um UUID válido, gerar um novo
+                    processamento_id = str(uuid.uuid4())
+            else:
+                # Está vazio, gerar um novo
+                processamento_id = str(uuid.uuid4())
+            
+            dados_conta = {
+                "usuario_id": self.user_id,
+                "empresa": str(dados.get("empresa", "")),
+                "fornecedor": str(dados.get("fornecedor", "")),
+                "valor": float(dados.get("valor", 0)),
+                "data_pagamento": dados.get("data_pagamento"),
+                "descricao": str(dados.get("descricao", "")),
+                "categoria": str(dados.get("categoria", "OUTROS")),
+                "arquivo_origem": str(dados.get("arquivo_origem", "")),
+                "processamento_id": processamento_id
+            }
+            
+            # Inserir no banco
+            response = self.supabase.table("contas_pagas").insert(dados_conta).execute()
+            
+            if response.data:
+                return {
+                    "success": True,
+                    "message": "Conta paga inserida com sucesso",
+                    "data": response.data[0]
+                }
+            else:
+                return {"success": False, "message": "Erro ao inserir conta paga"}
+                
+        except Exception as e:
+            return {"success": False, "message": f"Erro ao inserir conta paga: {str(e)}"}
     
     # ==================== EMPRESAS ====================
     
@@ -681,21 +766,31 @@ class SupabaseClient:
     # ==================== VERIFICAÇÃO DE DUPLICATAS ====================
     
     def verificar_duplicatas_contas_a_pagar(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Verifica se existem duplicatas nas contas a pagar antes de inserir."""
+        """
+        Verifica se existem duplicatas nas contas a pagar antes de inserir.
+        
+        Critérios de duplicata:
+        1. Mesmo usuário, empresa, fornecedor, valor, data_vencimento E descrição
+        2. OU mesmo usuário, empresa, valor, data_vencimento com descrições muito similares
+        """
         if not self.user_id:
-            return {"duplicatas": 0, "novos": len(df)}
+            return {"duplicatas": 0, "novos": len(df), "df_novos": df}
         
         try:
             duplicatas = 0
             novos_registros = []
+            registros_duplicados = []
+            
+            print(f"🔍 Verificando duplicatas para {len(df)} registros de contas a pagar...")
             
             for _, row in df.iterrows():
-                # Criar chave única baseada nos campos principais
-                empresa = str(row.get('empresa', '')).strip()
+                # Extrair e normalizar campos principais
+                empresa = str(row.get('empresa', '')).strip().upper()
+                fornecedor = str(row.get('fornecedor', '')).strip().upper()
                 valor = float(row.get('valor', 0)) if not pd.isna(row.get('valor', 0)) else 0
-                descricao = str(row.get('descricao', '')).strip()
+                descricao = str(row.get('descricao', '')).strip().upper()
                 
-                # Tratar data
+                # Tratar data de vencimento
                 data_vencimento = row.get('data_vencimento', '')
                 if pd.isna(data_vencimento):
                     data_vencimento = '2025-01-01'
@@ -703,43 +798,103 @@ class SupabaseClient:
                     if hasattr(data_vencimento, 'strftime'):
                         data_vencimento = data_vencimento.strftime('%Y-%m-%d')
                     else:
-                        data_vencimento = str(data_vencimento)
+                        data_vencimento = str(data_vencimento)[:10]  # Garantir formato YYYY-MM-DD
                 
-                # Verificar se já existe um registro similar
-                response = self.supabase.table("contas_a_pagar").select("id").eq("usuario_id", self.user_id).eq("empresa", empresa).eq("valor", valor).eq("data_vencimento", data_vencimento).eq("descricao", descricao).limit(1).execute()
+                # Verificar duplicatas no banco
+                response = self.supabase.table("contas_a_pagar")\
+                    .select("id,empresa,fornecedor,valor,data_vencimento,descricao")\
+                    .eq("usuario_id", self.user_id)\
+                    .eq("empresa", empresa)\
+                    .eq("valor", valor)\
+                    .eq("data_vencimento", data_vencimento)\
+                    .limit(10)\
+                    .execute()
+                
+                eh_duplicata = False
                 
                 if response.data and len(response.data) > 0:
+                    # Verificar se algum registro existente é muito similar
+                    for registro_existente in response.data:
+                        fornecedor_existente = str(registro_existente.get('fornecedor', '')).strip().upper()
+                        descricao_existente = str(registro_existente.get('descricao', '')).strip().upper()
+                        
+                        # Critério 1: Fornecedor e descrição exatos
+                        if (fornecedor == fornecedor_existente and 
+                            descricao == descricao_existente):
+                            eh_duplicata = True
+                            break
+                        
+                        # Critério 2: Mesmo fornecedor e descrições muito similares
+                        if fornecedor == fornecedor_existente:
+                            similaridade = self._calcular_similaridade_texto(descricao, descricao_existente)
+                            if similaridade > 0.8:
+                                eh_duplicata = True
+                                break
+                        
+                        # Critério 3: Descrições idênticas (mesmo sem fornecedor)
+                        if descricao and len(descricao) > 10 and descricao == descricao_existente:
+                            eh_duplicata = True
+                            break
+                
+                if eh_duplicata:
                     duplicatas += 1
+                    registros_duplicados.append({
+                        'empresa': row.get('empresa', ''),
+                        'fornecedor': row.get('fornecedor', ''),
+                        'valor': valor,
+                        'data_vencimento': data_vencimento,
+                        'descricao': row.get('descricao', ''),
+                        'motivo': 'Registro similar já existe no banco'
+                    })
+                    print(f"📋 Duplicata encontrada: {empresa} - {fornecedor} - R${valor}")
                 else:
                     novos_registros.append(row)
             
-            return {
+            resultado = {
                 "duplicatas": duplicatas,
                 "novos": len(novos_registros),
-                "df_novos": pd.DataFrame(novos_registros) if novos_registros else pd.DataFrame()
+                "df_novos": pd.DataFrame(novos_registros) if novos_registros else pd.DataFrame(),
+                "registros_duplicados": registros_duplicados
             }
             
+            if duplicatas > 0:
+                print(f"⚠️ {duplicatas} duplicatas encontradas e serão ignoradas")
+            if len(novos_registros) > 0:
+                print(f"✅ {len(novos_registros)} registros novos serão inseridos")
+            
+            return resultado
+            
         except Exception as e:
-            print(f"Erro ao verificar duplicatas: {e}")
-            # Em caso de erro, considerar todos como novos
+            print(f"❌ Erro ao verificar duplicatas contas a pagar: {e}")
+            # Em caso de erro, considerar todos como novos para não bloquear
             return {"duplicatas": 0, "novos": len(df), "df_novos": df}
     
     def verificar_duplicatas_contas_pagas(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Verifica se existem duplicatas nas contas pagas antes de inserir."""
+        """
+        Verifica se existem duplicatas nas contas pagas antes de inserir.
+        
+        Critérios de duplicata:
+        1. Mesmo usuário, empresa, fornecedor, valor, data_pagamento E descrição
+        2. OU mesmo usuário, empresa, valor, data_pagamento com diferença mínima na descrição
+        """
         if not self.user_id:
-            return {"duplicatas": 0, "novos": len(df)}
+            return {"duplicatas": 0, "novos": len(df), "df_novos": df}
         
         try:
             duplicatas = 0
             novos_registros = []
+            registros_duplicados = []
+            
+            print(f"🔍 Verificando duplicatas para {len(df)} registros de contas pagas...")
             
             for _, row in df.iterrows():
-                # Criar chave única baseada nos campos principais
-                empresa = str(row.get('empresa', '')).strip()
+                # Extrair e normalizar campos principais
+                empresa = str(row.get('empresa', '')).strip().upper()
+                fornecedor = str(row.get('fornecedor', '')).strip().upper()
                 valor = float(row.get('valor', 0)) if not pd.isna(row.get('valor', 0)) else 0
-                descricao = str(row.get('descricao', '')).strip()
+                descricao = str(row.get('descricao', '')).strip().upper()
                 
-                # Tratar data
+                # Tratar data de pagamento
                 data_pagamento = row.get('data_pagamento', '')
                 if pd.isna(data_pagamento):
                     data_pagamento = '2025-01-01'
@@ -747,23 +902,100 @@ class SupabaseClient:
                     if hasattr(data_pagamento, 'strftime'):
                         data_pagamento = data_pagamento.strftime('%Y-%m-%d')
                     else:
-                        data_pagamento = str(data_pagamento)
+                        data_pagamento = str(data_pagamento)[:10]  # Garantir formato YYYY-MM-DD
                 
-                # Verificar se já existe um registro similar
-                response = self.supabase.table("contas_pagas").select("id").eq("usuario_id", self.user_id).eq("empresa", empresa).eq("valor", valor).eq("data_pagamento", data_pagamento).eq("descricao", descricao).limit(1).execute()
+                # Primeiro: verificação exata (incluindo fornecedor)
+                response = self.supabase.table("contas_pagas")\
+                    .select("id,empresa,fornecedor,valor,data_pagamento,descricao")\
+                    .eq("usuario_id", self.user_id)\
+                    .eq("empresa", empresa)\
+                    .eq("valor", valor)\
+                    .eq("data_pagamento", data_pagamento)\
+                    .limit(10)\
+                    .execute()
+                
+                eh_duplicata = False
                 
                 if response.data and len(response.data) > 0:
+                    # Verificar se algum registro existente é muito similar
+                    for registro_existente in response.data:
+                        fornecedor_existente = str(registro_existente.get('fornecedor', '')).strip().upper()
+                        descricao_existente = str(registro_existente.get('descricao', '')).strip().upper()
+                        
+                        # Critério 1: Fornecedor e descrição exatos
+                        if (fornecedor == fornecedor_existente and 
+                            descricao == descricao_existente):
+                            eh_duplicata = True
+                            break
+                        
+                        # Critério 2: Mesmo fornecedor e descrições muito similares (>80% similaridade)
+                        if fornecedor == fornecedor_existente:
+                            similaridade = self._calcular_similaridade_texto(descricao, descricao_existente)
+                            if similaridade > 0.8:
+                                eh_duplicata = True
+                                break
+                        
+                        # Critério 3: Descrições idênticas (mesmo sem fornecedor)
+                        if descricao and len(descricao) > 10 and descricao == descricao_existente:
+                            eh_duplicata = True
+                            break
+                
+                if eh_duplicata:
                     duplicatas += 1
+                    registros_duplicados.append({
+                        'empresa': row.get('empresa', ''),
+                        'fornecedor': row.get('fornecedor', ''),
+                        'valor': valor,
+                        'data_pagamento': data_pagamento,
+                        'descricao': row.get('descricao', ''),
+                        'motivo': 'Registro similar já existe no banco'
+                    })
+                    print(f"📋 Duplicata encontrada: {empresa} - {fornecedor} - R${valor}")
                 else:
                     novos_registros.append(row)
             
-            return {
+            resultado = {
                 "duplicatas": duplicatas,
                 "novos": len(novos_registros),
-                "df_novos": pd.DataFrame(novos_registros) if novos_registros else pd.DataFrame()
+                "df_novos": pd.DataFrame(novos_registros) if novos_registros else pd.DataFrame(),
+                "registros_duplicados": registros_duplicados
             }
             
+            if duplicatas > 0:
+                print(f"⚠️ {duplicatas} duplicatas encontradas e serão ignoradas")
+            if len(novos_registros) > 0:
+                print(f"✅ {len(novos_registros)} registros novos serão inseridos")
+            
+            return resultado
+            
         except Exception as e:
-            print(f"Erro ao verificar duplicatas: {e}")
-            # Em caso de erro, considerar todos como novos
+            print(f"❌ Erro ao verificar duplicatas: {e}")
+            # Em caso de erro, considerar todos como novos para não bloquear
             return {"duplicatas": 0, "novos": len(df), "df_novos": df}
+    
+    def _calcular_similaridade_texto(self, texto1: str, texto2: str) -> float:
+        """
+        Calcula similaridade entre dois textos usando algoritmo simples.
+        Retorna valor entre 0 (totalmente diferente) e 1 (idêntico).
+        """
+        if not texto1 or not texto2:
+            return 0.0
+        
+        # Normalizar textos
+        t1 = texto1.upper().strip()
+        t2 = texto2.upper().strip()
+        
+        if t1 == t2:
+            return 1.0
+        
+        # Calcular similaridade por palavras comuns
+        palavras1 = set(t1.split())
+        palavras2 = set(t2.split())
+        
+        if not palavras1 or not palavras2:
+            return 0.0
+        
+        intersecao = palavras1.intersection(palavras2)
+        uniao = palavras1.union(palavras2)
+        
+        return len(intersecao) / len(uniao) if uniao else 0.0

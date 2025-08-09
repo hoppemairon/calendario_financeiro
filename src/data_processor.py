@@ -187,6 +187,24 @@ class ExcelProcessor:
         else:
             return pd.DataFrame()
     
+    def carregar_arquivo_excel(self, arquivo_path: str) -> Optional[pd.DataFrame]:
+        """
+        Carrega um arquivo Excel genérico.
+        
+        Args:
+            arquivo_path: Caminho para o arquivo Excel
+            
+        Returns:
+            DataFrame carregado ou None se houver erro
+        """
+        try:
+            df = pd.read_excel(arquivo_path)
+            logger.info(f"Arquivo Excel carregado com sucesso: {arquivo_path} ({len(df)} linhas)")
+            return df
+        except Exception as e:
+            logger.error(f"Erro ao carregar arquivo Excel {arquivo_path}: {str(e)}")
+            return None
+    
     def salvar_dados_processados(self, df: pd.DataFrame, nome_arquivo: str) -> bool:
         """
         Salva DataFrame processado em arquivo Excel.

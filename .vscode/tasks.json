@@ -7,7 +7,7 @@
 			"command": "streamlit",
 			"args": [
 				"run",
-				"main.py"
+				"main_with_auth.py"
 			],
 			"group": "build",
 			"isBackground": true,

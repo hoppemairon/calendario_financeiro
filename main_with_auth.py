@@ -6,12 +6,13 @@ import streamlit as st
 import sys
 import os
 import pandas as pd
-import calendar
 import uuid
+import calendar
 import time
 from datetime import datetime, timedelta
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+
+# Adicionar src ao path ANTES das importações locais
+sys.path.append('src')
 
 # Configurar página DEVE ser a primeira coisa
 st.set_page_config(
@@ -101,14 +102,23 @@ div[data-testid="metric-container"],
 </style>
 """, unsafe_allow_html=True)
 
-# Adicionar src ao path
-sys.path.append('src')
-
-from auth.auth_manager import AuthManager
-from database.supabase_client import SupabaseClient
+from src.auth.auth_manager import AuthManager
+from src.database.supabase_client import SupabaseClient
 
 # Importar utilitários de formatação
-from utils import formatar_moeda_brasileira, formatar_data_brasileira, obter_mes_nome_brasileiro
+from src.utils import formatar_moeda_brasileira, formatar_data_brasileira, obter_mes_nome_brasileiro
+
+# Importar módulos de processamento
+from src.data_processor import ExcelProcessor
+from src.payment_analyzer import PaymentAnalyzer
+from src.report_generator import ReportGenerator
+from src.client_file_converter import ClientFileConverter
+
+# Importar interface de compartilhamento
+from src.compartilhamento_ui import mostrar_compartilhamento_compacto, mostrar_interface_compartilhamento
+
+# Importar interface de validação de contas pagas
+from src.contas_pagas_interface import mostrar_interface_validacao_contas_pagas
 
 # Inicializar gerenciador de autenticação
 @st.cache_resource
@@ -204,12 +214,6 @@ def tratar_confirmacao_email(query_params):
 def carregar_aplicacao_principal():
     """Carrega a aplicação principal após autenticação."""
     
-    # Importar módulos da aplicação
-    from data_processor import ExcelProcessor
-    from payment_analyzer import PaymentAnalyzer
-    from report_generator import ReportGenerator
-    from client_file_converter import ClientFileConverter
-    
     # Obter cliente Supabase
     supabase_client = auth_manager.get_supabase_client()
     
@@ -298,6 +302,9 @@ def carregar_aplicacao_principal():
     # Armazenar configuração no session state
     st.session_state['verificar_duplicatas'] = verificar_duplicatas
     
+    # Adicionar compartilhamento compacto na sidebar
+    mostrar_compartilhamento_compacto(supabase_client)
+    
     # Processamento dos arquivos
     if processar and (uploaded_a_pagar or uploaded_pagas):
         processar_arquivos(
@@ -336,10 +343,19 @@ def mostrar_resumo_dashboard(supabase_client: SupabaseClient):
                 total_a_pagar = resumo.get('total_a_pagar', 0)
                 total_pago = resumo.get('total_pago', 0)
                 saldo = total_a_pagar - total_pago
+                
+                # Lógica correta: saldo positivo = bom (sobrou dinheiro)
+                if saldo > 0:
+                    delta_texto = "✅ Economia (Bom)"
+                elif saldo < 0:
+                    delta_texto = "❌ Estouro (Ruim)"
+                else:
+                    delta_texto = "⚖️ Equilibrado"
+                
                 st.metric(
                     "📊 Saldo",
                     formatar_moeda_brasileira(saldo),
-                    "Diferença"
+                    delta_texto
                 )
             
             with col4:
@@ -477,7 +493,6 @@ def detectar_e_processar_arquivo(uploaded_file, converter, processor):
     uploaded_file.seek(0)
     
     # Salvar arquivo temporário com nome único
-    import uuid
     temp_path = f"temp_{uuid.uuid4().hex[:8]}_{uploaded_file.name}"
     
     try:
@@ -522,7 +537,6 @@ def processar_arquivo_padrao(uploaded_file, processor):
     """Processa arquivo no formato padrão."""
     
     # Salvar temporariamente com nome único
-    import uuid
     temp_path = f"temp_padrao_{uuid.uuid4().hex[:8]}_{uploaded_file.name}"
     
     try:
@@ -756,15 +770,22 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
     
     total_a_pagar = sum(conta['valor'] for conta in contas_a_pagar_dia)
     total_pagas = sum(conta['valor'] for conta in contas_pagas_dia)
-    diferenca = total_pagas - total_a_pagar
+    diferenca = total_a_pagar - total_pagas  # Corrigido: a_pagar - pago
     
     with col1:
         st.metric("Total a Pagar", formatar_moeda_brasileira(total_a_pagar), f"{len(contas_a_pagar_dia)} contas")
     with col2:
         st.metric("Total Pago", formatar_moeda_brasileira(total_pagas), f"{len(contas_pagas_dia)} contas")
     with col3:
-        st.metric("Saldo do Dia", formatar_moeda_brasileira(diferenca), 
-                 "✅ Positivo" if diferenca >= 0 else "❌ Negativo")
+        # Lógica correta: positivo = bom (sobrou dinheiro), negativo = ruim (estouro)
+        if diferenca > 0:
+            status_text = "✅ Economia"
+        elif diferenca < 0:
+            status_text = "❌ Estouro"
+        else:
+            status_text = "⚖️ Equilibrado"
+            
+        st.metric("Saldo do Dia", formatar_moeda_brasileira(diferenca), status_text)
     
     # Relatório de Fornecedores
     st.markdown("### 🏢 Relatório por Fornecedor")
@@ -804,8 +825,8 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
         # Converter para DataFrame
         df_fornecedores = pd.DataFrame(list(relatorio_fornecedores.values()))
         
-        # Calcular diferença (total pago - total a pagar)
-        df_fornecedores['diferenca'] = df_fornecedores['total_pago'] - df_fornecedores['total_a_pagar']
+        # Calcular diferença (total a pagar - total pago) = lógica correta
+        df_fornecedores['diferenca'] = df_fornecedores['total_a_pagar'] - df_fornecedores['total_pago']
         
         # Formatar valores para exibição
         df_display_fornecedores = df_fornecedores.copy()
@@ -820,7 +841,7 @@ def mostrar_detalhes_dia(dia_info, df_a_pagar, df_pagas):
             'total_pago': 'Total Pago',
             'qtd_a_pagar': 'Qtd. a Pagar',
             'qtd_pagas': 'Qtd. Pagas',
-            'diferenca': 'Diferença (Pago - A Pagar)'
+            'diferenca': 'Saldo (A Pagar - Pago)'
         })
         
         # Ordenar por valor total (a pagar + pago) decrescente
@@ -899,7 +920,6 @@ def remover_arquivo_temporario(caminho_arquivo):
     Args:
         caminho_arquivo: Caminho para o arquivo temporário
     """
-    import time
     
     if not os.path.exists(caminho_arquivo):
         return True
@@ -909,7 +929,7 @@ def remover_arquivo_temporario(caminho_arquivo):
         try:
             os.remove(caminho_arquivo)
             return True
-        except (PermissionError, OSError) as e:
+        except (PermissionError, OSError):
             if tentativa < 4:  # Não é a última tentativa
                 time.sleep(0.5)  # Aguardar 500ms antes da próxima tentativa
                 continue
@@ -920,26 +940,22 @@ def remover_arquivo_temporario(caminho_arquivo):
     
     return False
 
-def executar_auditoria_dia(arquivo_excel, data_filtro, contas_sistema_a_pagar, contas_sistema_pagas):
+def executar_auditoria_dia(arquivo_excel, data_filtro, contas_sistema_a_pagar, _contas_sistema_pagas):
     """
     Executa auditoria comparando dados do Excel com dados do sistema para um dia específico.
     
     Args:
         arquivo_excel: Arquivo Excel para auditoria
         data_filtro: Data do dia sendo auditado
-        contas_sistema_a_pagar: Lista de contas a pagar do sistema para o dia
-        contas_sistema_pagas: Lista de contas pagas do sistema para o dia
+        contas_sistema_a_pagar: Contas a pagar do sistema
+        _contas_sistema_pagas: Contas pagas do sistema (não utilizado atualmente)
     """
     try:
-        # Importar classes necessárias
-        from client_file_converter import ClientFileConverter
-        from data_processor import ExcelProcessor
-        
+        # Usar classes já importadas globalmente
         converter = ClientFileConverter()
         processor = ExcelProcessor()
         
         # Salvar arquivo temporário
-        import uuid
         temp_path = f"temp_audit_{uuid.uuid4().hex[:8]}_{arquivo_excel.name}"
         
         with open(temp_path, "wb") as f:
@@ -1149,22 +1165,22 @@ def executar_auditoria_dia(arquivo_excel, data_filtro, contas_sistema_a_pagar, c
         if 'temp_path' in locals():
             remover_arquivo_temporario(temp_path)
 
-def simular_reimportacao(df_excel, nome_arquivo):
+def simular_reimportacao(df_excel, _nome_arquivo):
     """
     Simula o que aconteceria se o arquivo fosse reimportado.
     
     Args:
         df_excel: DataFrame processado do Excel
-        nome_arquivo: Nome do arquivo original
+        _nome_arquivo: Nome do arquivo original (não utilizado atualmente)
     """
     try:
         # Importar cliente Supabase
-        auth_manager = st.session_state.get('auth_manager')
-        if not auth_manager:
+        auth_mgr = st.session_state.get('auth_manager')
+        if not auth_mgr:
             st.error("❌ Erro: Gerenciador de autenticação não encontrado")
             return
             
-        supabase_client = auth_manager.get_supabase_client()
+        supabase_client = auth_mgr.get_supabase_client()
         
         st.markdown("#### 🧪 Simulação de Re-importação")
         
@@ -1297,15 +1313,12 @@ def executar_auditoria_completa(arquivo_excel, supabase_client):
         supabase_client: Cliente do Supabase para buscar dados do sistema
     """
     try:
-        from client_file_converter import ClientFileConverter
-        from data_processor import ExcelProcessor
-        
+        # Usar classes já importadas globalmente
         converter = ClientFileConverter()
         processor = ExcelProcessor()
         
         with st.spinner("🔍 Executando auditoria completa..."):
             # Salvar arquivo temporário
-            import uuid
             temp_path = f"temp_audit_completa_{uuid.uuid4().hex[:8]}_{arquivo_excel.name}"
             
             with open(temp_path, "wb") as f:
@@ -1456,8 +1469,6 @@ def calcular_semanas_do_mes(ano, mes):
     Calcula todas as semanas de um mês específico.
     Retorna lista com informações de cada semana.
     """
-    import calendar
-    
     # Configurar para começar com domingo
     calendar.setfirstweekday(calendar.SUNDAY)
     cal = calendar.monthcalendar(ano, mes)
@@ -1539,7 +1550,7 @@ def mostrar_calendario_semanal(semana_info, df_a_pagar, df_pagas, mes, ano):
     with col2:
         st.markdown("🟢 **Pago** - Valores pagos")
     with col3:
-        st.markdown("🔵 **Diferença** - Pago - A Pagar")
+        st.markdown("🔵 **Saldo** - A Pagar - Pago (Positivo=Economia, Negativo=Estouro)")
     with col4:
         st.markdown("📅 **Hoje** - Dia atual (destaque azul)")
     
@@ -1615,8 +1626,6 @@ def mostrar_calendario_mensal(df_a_pagar, df_pagas, mes, ano):
     Mostra o calendário mensal completo com informações financeiras compactas.
     """
     # Importar calendar
-    import calendar
-    
     # CSS para calendário mensal - ainda mais compacto
     st.markdown("""
     <style>
@@ -1650,7 +1659,7 @@ def mostrar_calendario_mensal(df_a_pagar, df_pagas, mes, ano):
     with col2:
         st.markdown("🟢 **Pago** - Valores pagos") 
     with col3:
-        st.markdown("🔵 **Diferença** - Pago - A Pagar")
+        st.markdown("🔵 **Saldo** - A Pagar - Pago (Positivo=Economia, Negativo=Estouro)")
     with col4:
         st.markdown("📅 **Hoje** - Dia atual (destaque azul)")
     
@@ -1719,8 +1728,6 @@ def calcular_dados_mes_completo(df_a_pagar, df_pagas, mes, ano):
     """
     Calcula os dados financeiros para todos os dias do mês.
     """
-    import calendar
-    
     # Obter número de dias no mês
     _, dias_no_mes = calendar.monthrange(ano, mes)
     
@@ -1789,15 +1796,13 @@ def mostrar_dia_mensal(dia, dados_dia, mes, ano):
     """
     Mostra um dia específico na visualização mensal - versão ultra compacta.
     """
-    from datetime import datetime
-    
     hoje = datetime.now()
     
     # Verificar se é hoje
     eh_hoje = dia == hoje.day and mes == hoje.month and ano == hoje.year
     
-    # Calcular diferença
-    diferenca = dados_dia.get('pagas', 0) - dados_dia.get('a_pagar', 0)
+    # Calcular diferença (lógica correta: a_pagar - pagas)
+    diferenca = dados_dia.get('a_pagar', 0) - dados_dia.get('pagas', 0)
     
     if dados_dia.get('a_pagar', 0) > 0 or dados_dia.get('pagas', 0) > 0:
         # Dia com movimentação - versão ultra compacta
@@ -1899,7 +1904,7 @@ def mostrar_resumo_mes(dados_mes):
     total_pagas = sum(dados_dia.get('pagas', 0) for dados_dia in dados_mes.values())
     total_contas_a_pagar = sum(dados_dia.get('qtd_a_pagar', 0) for dados_dia in dados_mes.values())
     total_contas_pagas = sum(dados_dia.get('qtd_pagas', 0) for dados_dia in dados_mes.values())
-    diferenca_mes = total_pagas - total_a_pagar
+    diferenca_mes = total_a_pagar - total_pagas  # Corrigido: a_pagar - pagas
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -1926,10 +1931,11 @@ def mostrar_resumo_mes(dados_mes):
     
     with col3:
         valor_diferenca = formatar_moeda_brasileira(diferenca_mes)
+        # Lógica correta: positivo = bom (sobrou dinheiro), negativo = ruim (estouro)
         cor_fundo = "#f0fdf4" if diferenca_mes >= 0 else "#fff5f5"
         cor_borda = "#bbf7d0" if diferenca_mes >= 0 else "#fecaca"
         cor_texto = "#16a34a" if diferenca_mes >= 0 else "#dc2626"
-        status_texto = "✅ Positivo" if diferenca_mes >= 0 else "❌ Negativo"
+        status_texto = "✅ Economia" if diferenca_mes > 0 else ("❌ Estouro" if diferenca_mes < 0 else "⚖️ Equilibrado")
         
         st.markdown(f"""
         <div style="padding: 12px; border-radius: 8px; background: {cor_fundo}; border: 2px solid {cor_borda};">
@@ -2025,8 +2031,6 @@ def mostrar_dia_semana(dia, dados_dia, mes, ano):
     """
     Mostra um dia específico na visualização semanal.
     """
-    from datetime import datetime
-    
     hoje = datetime.now()
     
     # Determinar cor de fundo baseada na atividade
@@ -2057,8 +2061,8 @@ def mostrar_dia_semana(dia, dados_dia, mes, ano):
         cor_fundo = "#dbeafe"  # Azul claro para hoje
         cor_borda = "#60a5fa"
     
-    # Calcular diferença
-    diferenca = dados_dia.get('pagas', 0) - dados_dia.get('a_pagar', 0)
+    # Calcular diferença (lógica correta: a_pagar - pagas)
+    diferenca = dados_dia.get('a_pagar', 0) - dados_dia.get('pagas', 0)
     
     # Definir ícones baseados no contexto do dia
     icone_dia = ""
@@ -2103,15 +2107,18 @@ def mostrar_dia_semana(dia, dados_dia, mes, ano):
             
             # Diferença com quadro igual aos outros componentes
             diferenca_valor = formatar_moeda_brasileira(diferenca, com_simbolo=False)
-            icone_diferenca = "🔺" if diferenca > 0 else "🔻" if diferenca < 0 else "➖"
+            # Determinar ícone e cores baseado na lógica correta
+            # Positivo = bom (sobrou dinheiro), negativo = ruim (estouro)
+            icone_diferenca = "✅" if diferenca > 0 else "❌" if diferenca < 0 else "➖"
             cor_diferenca = "#16a34a" if diferenca > 0 else "#dc2626" if diferenca < 0 else "#6b7280"
             cor_fundo_diferenca = "#f0fdf4" if diferenca > 0 else "#fff5f5" if diferenca < 0 else "#f8fafc"
+            status_diferenca = "Economia" if diferenca > 0 else "Estouro" if diferenca < 0 else "Equilibrado"
             
             st.markdown(f"""
             <div style="margin: 4px 0; padding: 4px; border-radius: 4px; background: {cor_fundo_diferenca};">
-                <div style="font-size: 0.5rem; font-weight: normal; color: {cor_diferenca}; margin-bottom: 1px;">{icone_diferenca} Diferença</div>
+                <div style="font-size: 0.5rem; font-weight: normal; color: {cor_diferenca}; margin-bottom: 1px;">{icone_diferenca} Saldo</div>
                 <div style="font-size: 0.65rem; font-weight: bold; color: {cor_diferenca}; margin-bottom: 1px;">{diferenca_valor}</div>
-                <div style="font-size: 0.45rem; color: #9ca3af;">Pago - A Pagar</div>
+                <div style="font-size: 0.45rem; color: #9ca3af;">{status_diferenca}</div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -2198,7 +2205,7 @@ def mostrar_resumo_semana(dados_semana, semana_info):
     total_pagas = sum(dados_dia.get('pagas', 0) for dados_dia in dados_semana.values())
     total_contas_a_pagar = sum(dados_dia.get('qtd_a_pagar', 0) for dados_dia in dados_semana.values())
     total_contas_pagas = sum(dados_dia.get('qtd_pagas', 0) for dados_dia in dados_semana.values())
-    diferenca_semana = total_pagas - total_a_pagar
+    diferenca_semana = total_a_pagar - total_pagas  # Corrigido: a_pagar - pagas
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -2225,10 +2232,11 @@ def mostrar_resumo_semana(dados_semana, semana_info):
     
     with col3:
         valor_diferenca = formatar_moeda_brasileira(diferenca_semana)
+        # Lógica correta: positivo = bom (sobrou dinheiro), negativo = ruim (estouro)
         cor_fundo = "#f0fdf4" if diferenca_semana >= 0 else "#fff5f5"
         cor_borda = "#bbf7d0" if diferenca_semana >= 0 else "#fecaca"
         cor_texto = "#16a34a" if diferenca_semana >= 0 else "#dc2626"
-        status_texto = "✅ Positivo" if diferenca_semana >= 0 else "❌ Negativo"
+        status_texto = "✅ Economia" if diferenca_semana > 0 else ("❌ Estouro" if diferenca_semana < 0 else "⚖️ Equilibrado")
         
         st.markdown(f"""
         <div style="padding: 8px; border-radius: 6px; background: {cor_fundo}; border: 1px solid {cor_borda};">
@@ -2271,7 +2279,14 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
     """Mostra dados carregados do banco."""
     
     # Tabs para diferentes visões
-    tab1, tab2, tab3, tab4 = st.tabs(["🗓️ Calendário", "📊 Dados Atuais", "🏢 Por Empresa", "📋 Exportar"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🗓️ Calendário", 
+        "📊 Dados Atuais", 
+        "🏢 Por Empresa", 
+        "📋 Exportar", 
+        "🤝 Compartilhamento",
+        "🔍 Validação Contas Pagas"
+    ])
     
     # Buscar dados uma vez para usar em todas as abas
     df_a_pagar = supabase_client.buscar_contas_a_pagar()
@@ -2390,6 +2405,14 @@ def mostrar_dados_banco(supabase_client: SupabaseClient, analyzer, report_gen):
                         
                 except Exception as e:
                     st.error(f"Erro ao gerar relatório: {str(e)}")
+    
+    with tab5:
+        # Usar interface já importada
+        mostrar_interface_compartilhamento(supabase_client)
+    
+    with tab6:
+        # Interface de validação de contas pagas
+        mostrar_interface_validacao_contas_pagas(supabase_client)
 
 if __name__ == "__main__":
     main()
